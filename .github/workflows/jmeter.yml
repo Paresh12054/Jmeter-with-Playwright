@@ -13,18 +13,20 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install JMeter
+      - name: Install JMeter (latest)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jmeter
+          JMETER_VERSION=5.6.3
+          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-$JMETER_VERSION.tgz
+          tar -xzf apache-jmeter-$JMETER_VERSION.tgz
+          mv apache-jmeter-$JMETER_VERSION jmeter
 
       - name: Run JMeter Test
         run: |
-          jmeter -n -t GithubTest.jmx -l results.jtl
+          ./jmeter/bin/jmeter -n -t GithubTest.jmx -l results.jtl
 
       - name: Generate HTML Report
         run: |
-          jmeter -g results.jtl -o report
+          ./jmeter/bin/jmeter -g results.jtl -o report
 
       - name: Upload Report
         uses: actions/upload-artifact@v4
