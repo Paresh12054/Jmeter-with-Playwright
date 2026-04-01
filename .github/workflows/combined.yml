@@ -52,7 +52,7 @@ jobs:
 
           while [ $SECONDS -lt $END ]; do
             echo "Running Playwright tests..."
-            npx playwright test Demo1.spec.ts || true
+            npx playwright test tests/Demo1.spec.ts || true
 
             echo "Sleeping for 4 minutes..."
             sleep 240
