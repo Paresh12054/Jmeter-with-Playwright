@@ -1,0 +1,33 @@
+name: Run JMeter Test
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  jmeter-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install JMeter
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jmeter
+
+      - name: Run JMeter Test
+        run: |
+          jmeter -n -t GithubTest.jmx -l results.jtl
+
+      - name: Generate HTML Report
+        run: |
+          jmeter -g results.jtl -o report
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmeter-report
+          path: report
