@@ -49,10 +49,16 @@ jobs:
       - name: Run Playwright periodically
         run: |
           END=$((SECONDS+600))
+          RUN=1
 
           while [ $SECONDS -lt $END ]; do
-            echo "Running Playwright tests..."
-            npx playwright test tests/Demo1.spec.ts || true
+            echo "Running Playwright tests... Run $RUN"
+
+            npx playwright test tests/Demo1.spec.ts --reporter=html
+
+            mv playwright-report playwright-report-$RUN
+
+            RUN=$((RUN+1))
 
             echo "Sleeping for 3 minutes..."
             sleep 180
@@ -79,9 +85,9 @@ jobs:
           name: jmeter-report
           path: report
 
-      - name: Upload Playwright Report
+      - name: Upload Playwright Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report
+          name: playwright-reports
+          path: playwright-report-*
