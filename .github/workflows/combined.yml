@@ -1,0 +1,82 @@
+name: JMeter + Playwright Combined Pipeline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  performance-and-ui:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # -------------------------
+      # Install Node (Playwright)
+      # -------------------------
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install Node Dependencies
+        run: npm install
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      # -------------------------
+      # Install JMeter
+      # -------------------------
+      - name: Install JMeter
+        run: |
+          JMETER_VERSION=5.6.3
+          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-$JMETER_VERSION.tgz
+          tar -xzf apache-jmeter-$JMETER_VERSION.tgz
+          mv apache-jmeter-$JMETER_VERSION jmeter
+
+      # -------------------------
+      # Run JMeter (10 mins) in background
+      # -------------------------
+      - name: Start JMeter Test
+        run: |
+          ./jmeter/bin/jmeter -n -t GithubTest.jmx -l results.jtl -Jduration=600 &
+          echo $! > jmeter.pid
+
+      # -------------------------
+      # Run Playwright every 4 mins for 10 mins
+      # -------------------------
+      - name: Run Playwright periodically
+        run: |
+          END=$((SECONDS+600))
+
+          while [ $SECONDS -lt $END ]; do
+            echo "Running Playwright tests..."
+            npx playwright test Demo1.spec.ts || true
+
+            echo "Sleeping for 4 minutes..."
+            sleep 240
+          done
+
+      # -------------------------
+      # Stop JMeter
+      # -------------------------
+      - name: Stop JMeter
+        run: |
+          kill $(cat jmeter.pid) || true
+
+      # -------------------------
+      # Upload Reports
+      # -------------------------
+      - name: Upload JMeter Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmeter-results
+          path: results.jtl
+
+      - name: Upload Playwright Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
