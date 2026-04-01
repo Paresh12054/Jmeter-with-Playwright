@@ -49,21 +49,19 @@ jobs:
       - name: Run Playwright periodically
         run: |
           END=$((SECONDS+600))
-          RUN=1
 
           while [ $SECONDS -lt $END ]; do
-            echo "Running Playwright tests... Run $RUN"
+            TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+
+            echo "Running Playwright tests at $TIMESTAMP..."
 
             npx playwright test tests/Demo1.spec.ts --reporter=html
 
-            mv playwright-report playwright-report-$RUN
-
-            RUN=$((RUN+1))
+            mv playwright-report "playwright-report-$TIMESTAMP"
 
             echo "Sleeping for 3 minutes..."
             sleep 180
           done
-
       # -------------------------
       # Stop JMeter
       # -------------------------
