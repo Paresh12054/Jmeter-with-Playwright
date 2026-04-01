@@ -1,0 +1,736 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Test Plan">
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+        <collectionProp name="Arguments.arguments"/>
+      </elementProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Thread Group">
+        <intProp name="ThreadGroup.num_threads">1</intProp>
+        <intProp name="ThreadGroup.ramp_time">1</intProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <stringProp name="LoopController.loops">1</stringProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <com.googlecode.jmeter.plugins.webdriver.config.ChromeDriverConfig guiclass="com.googlecode.jmeter.plugins.webdriver.config.gui.ChromeDriverConfigGui" testclass="com.googlecode.jmeter.plugins.webdriver.config.ChromeDriverConfig" testname="jp@gc - Chrome Driver Config" enabled="true">
+          <boolProp name="WebDriverConfig.acceptinsecurecerts">false</boolProp>
+          <boolProp name="WebDriverConfig.reset_per_iteration">false</boolProp>
+          <stringProp name="WebDriverConfig.driver_path">C:\Paresh\Tools\apache-jmeter-5.6.3 - new\apache-jmeter-5.6.3\licenses\chromedriver-win64\chromedriver-win64\chromedriver.exe</stringProp>
+          <boolProp name="WebDriverConfig.dev_mode">false</boolProp>
+          <boolProp name="WebDriverConfig.headless">false</boolProp>
+          <boolProp name="WebDriverConfig.maximize_browser">true</boolProp>
+          <stringProp name="ChromeDriverConfig.additional_args"></stringProp>
+          <stringProp name="ChromeDriverConfig.binary_path"></stringProp>
+          <stringProp name="WebDriverConfig.proxy_type">SYSTEM</stringProp>
+          <stringProp name="WebDriverConfig.proxy_pac_url"></stringProp>
+          <stringProp name="WebDriverConfig.http_host"></stringProp>
+          <intProp name="WebDriverConfig.http_port">8080</intProp>
+          <boolProp name="WebDriverConfig.use_http_for_all_protocols">true</boolProp>
+          <stringProp name="WebDriverConfig.https_host"></stringProp>
+          <intProp name="WebDriverConfig.https_port">8080</intProp>
+          <boolProp name="WebDriverConfig.use_ftp_proxy">true</boolProp>
+          <stringProp name="WebDriverConfig.ftp_host"></stringProp>
+          <intProp name="WebDriverConfig.ftp_port">8080</intProp>
+          <boolProp name="WebDriverConfig.use_socks_proxy">true</boolProp>
+          <stringProp name="WebDriverConfig.socks_host"></stringProp>
+          <intProp name="WebDriverConfig.socks_port">8080</intProp>
+          <stringProp name="WebDriverConfig.no_proxy">localhost</stringProp>
+          <stringProp name="WebDriverConfig.custom_capabilites"></stringProp>
+        </com.googlecode.jmeter.plugins.webdriver.config.ChromeDriverConfig>
+        <hashTree/>
+        <com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler guiclass="com.googlecode.jmeter.plugins.webdriver.sampler.gui.WebDriverSamplerGui" testclass="com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler" testname="jp@gc - WebDriver Sampler - Only RSC parameter" enabled="false">
+          <stringProp name="WebDriverSampler.script">import org.openqa.selenium.chrome.ChromeDriver
+import org.openqa.selenium.chrome.ChromeOptions
+import org.openqa.selenium.devtools.DevTools
+import org.openqa.selenium.devtools.v116.network.Network
+import org.openqa.selenium.devtools.v116.network.model.Request
+import org.openqa.selenium.WebDriver
+import java.io.File
+import java.util.Optional
+
+ChromeOptions options = new ChromeOptions()
+options.addArguments(&quot;--remote-allow-origins=*&quot;)
+options.addArguments(&quot;--disable-gpu&quot;)
+options.addArguments(&quot;--window-size=1920,1080&quot;)
+options.addArguments(&quot;--start-maximized&quot;)
+
+WebDriver driver = new ChromeDriver(options)
+
+// Start DevTools session
+DevTools devTools = ((ChromeDriver) driver).getDevTools()
+devTools.createSession()
+
+// Enable Network domain to capture requests
+devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.empty()))
+
+// Create list to store _rsc values
+List&lt;String&gt; rscValues = []
+
+// Add listener for network requests (only extract _rsc values)
+devTools.addListener(Network.requestWillBeSent(), { request -&gt;
+    Request req = request.getRequest()
+    String url = req.getUrl()
+    if (url.contains(&quot;_rsc=&quot;)) {
+        def matcher = (url =~ /[?&amp;]_rsc=([^&amp;]+)/)
+        if (matcher.find()) {
+            rscValues.add(matcher.group(1))
+        }
+    }
+})
+
+String username = &quot;goldtest&quot;
+String password = &quot;g0ld5ive&quot;
+String baseUrl = &quot;https://www.perf-selfridges.com/GB/en/cat/?freeText=jeans&amp;srch=Y&quot;
+String authenticatedUrl = &quot;https://${username}:${password}@&quot; + baseUrl.substring(8)
+
+driver.get(authenticatedUrl)
+Thread.sleep(5000)  // Wait to capture network activity
+
+// Write _rsc values to CSV
+def csvFile = new File(&quot;C:/Network_Requests/network_requests_rscparam.csv&quot;)
+csvFile.withWriter(&apos;UTF-8&apos;) { writer -&gt;
+    writer.writeLine(&quot;_rsc Value&quot;)
+    rscValues.each { writer.writeLine(it) }
+}
+
+driver.quit()
+</stringProp>
+          <stringProp name="WebDriverSampler.parameters"></stringProp>
+          <stringProp name="WebDriverSampler.language">groovy</stringProp>
+        </com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler>
+        <hashTree/>
+        <ResultCollector guiclass="ViewResultsFullVisualizer" testclass="ResultCollector" testname="View Results Tree">
+          <boolProp name="ResultCollector.error_logging">false</boolProp>
+          <objProp>
+            <name>saveConfig</name>
+            <value class="SampleSaveConfiguration">
+              <time>true</time>
+              <latency>true</latency>
+              <timestamp>true</timestamp>
+              <success>true</success>
+              <label>true</label>
+              <code>true</code>
+              <message>true</message>
+              <threadName>true</threadName>
+              <dataType>true</dataType>
+              <encoding>false</encoding>
+              <assertions>true</assertions>
+              <subresults>true</subresults>
+              <responseData>false</responseData>
+              <samplerData>false</samplerData>
+              <xml>false</xml>
+              <fieldNames>true</fieldNames>
+              <responseHeaders>false</responseHeaders>
+              <requestHeaders>false</requestHeaders>
+              <responseDataOnError>false</responseDataOnError>
+              <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+              <assertionsResultsToSave>0</assertionsResultsToSave>
+              <bytes>true</bytes>
+              <sentBytes>true</sentBytes>
+              <url>true</url>
+              <threadCounts>true</threadCounts>
+              <idleTime>true</idleTime>
+              <connectTime>true</connectTime>
+            </value>
+          </objProp>
+          <stringProp name="filename"></stringProp>
+        </ResultCollector>
+        <hashTree/>
+        <com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler guiclass="com.googlecode.jmeter.plugins.webdriver.sampler.gui.WebDriverSamplerGui" testclass="com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler" testname="jp@gc - WebDriver Sampler - Only RSC requests" enabled="false">
+          <stringProp name="WebDriverSampler.script">import org.openqa.selenium.chrome.ChromeDriver
+import org.openqa.selenium.chrome.ChromeOptions
+import org.openqa.selenium.devtools.DevTools
+import org.openqa.selenium.devtools.v116.network.Network
+import org.openqa.selenium.devtools.v116.network.model.Request
+import org.openqa.selenium.WebDriver
+import java.io.File
+import java.util.Optional
+
+ChromeOptions options = new ChromeOptions()
+options.addArguments(&quot;--remote-allow-origins=*&quot;)
+options.addArguments(&quot;--disable-gpu&quot;)
+options.addArguments(&quot;--window-size=1920,1080&quot;)
+options.addArguments(&quot;--start-maximized&quot;)
+
+WebDriver driver = new ChromeDriver(options)
+
+// Start DevTools session
+DevTools devTools = ((ChromeDriver) driver).getDevTools()
+devTools.createSession()
+
+// Enable Network domain to capture requests
+devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.empty()))
+
+// Create list to store request URLs
+List&lt;String&gt; requestUrls = []
+
+// Add listener for network requests (only _rsc URLs)
+devTools.addListener(Network.requestWillBeSent(), { request -&gt;
+    Request req = request.getRequest()
+    String url = req.getUrl()
+    if (url.contains(&quot;_rsc&quot;)) {
+        requestUrls.add(url)
+    }
+})
+
+String username = &quot;goldtest&quot;
+String password = &quot;g0ld5ive&quot;
+String baseUrl = &quot;https://www.perf-selfridges.com/GB/en/cat/?freeText=jeans&amp;srch=Y&quot;
+String authenticatedUrl = &quot;https://${username}:${password}@&quot; + baseUrl.substring(8)
+
+driver.get(authenticatedUrl)
+Thread.sleep(5000)  // Wait to capture network activity
+
+// Write filtered request URLs to CSV
+def csvFile = new File(&quot;C:/Network_Requests/network_requests_rsc.csv&quot;)
+csvFile.withWriter(&apos;UTF-8&apos;) { writer -&gt;
+    writer.writeLine(&quot;URL&quot;)
+    requestUrls.each { writer.writeLine(it) }
+}
+
+driver.quit()
+</stringProp>
+          <stringProp name="WebDriverSampler.parameters"></stringProp>
+          <stringProp name="WebDriverSampler.language">groovy</stringProp>
+        </com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler>
+        <hashTree/>
+        <com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler guiclass="com.googlecode.jmeter.plugins.webdriver.sampler.gui.WebDriverSamplerGui" testclass="com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler" testname="jp@gc - WebDriver Sampler - All sub requests" enabled="false">
+          <stringProp name="WebDriverSampler.script">import org.openqa.selenium.chrome.ChromeDriver
+import org.openqa.selenium.chrome.ChromeOptions
+import org.openqa.selenium.devtools.DevTools
+import org.openqa.selenium.devtools.v116.network.Network
+import org.openqa.selenium.devtools.v116.network.model.Request
+import org.openqa.selenium.WebDriver
+import java.io.FileWriter
+import java.util.Optional
+
+//System.setProperty(&quot;webdriver.chrome.driver&quot;, &quot;C:/Paresh/Tools/apache-jmeter-5.6.3 - new/apache-jmeter-5.6.3/licenses/chromedriver-win64/chromedriver-win64/chromedriver.exe&quot;)
+ChromeOptions options = new ChromeOptions()
+
+options.addArguments(&quot;--remote-allow-origins=*&quot;)
+options.addArguments(&quot;--disable-gpu&quot;)
+options.addArguments(&quot;--window-size=1920,1080&quot;)
+options.addArguments(&quot;--start-maximized&quot;)
+// optional: options.addArguments(&quot;--headless=new&quot;)
+
+WebDriver driver = new ChromeDriver(options)
+
+// Start DevTools session
+DevTools devTools = driver.getDevTools()
+devTools.createSession()
+
+// Enable Network domain to capture requests
+devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.empty()))
+
+// Create list to store request URLs
+List&lt;String&gt; requestUrls = []
+
+// Add listener for network requests
+devTools.addListener(Network.requestWillBeSent(), { request -&gt;
+   Request req = request.getRequest()
+    requestUrls.add(req.getUrl())
+})
+String username = &quot;goldtest&quot;
+String password = &quot;g0ld5ive&quot;
+String url = &quot;https://www.perf-selfridges.com/GB/en/cat/?freeText=aqua&amp;srch=Y&quot;
+String authenticatedUrl = &quot;https://${username}:${password}@&quot; + url.substring(8)  // Remove https:// before appending
+driver.get(authenticatedUrl)
+//driver.get(&quot;https://www.perf-selfridges.com/GB/en/cat/?freeText=jeans&amp;srch=Y&quot;)
+Thread.sleep(5000)  // Wait to capture network activity
+
+// Write request URLs to CSV
+def csvFile = new File(&quot;C:/Network_Requests/network_requests.csv&quot;)
+csvFile.withWriter(&apos;UTF-8&apos;) { writer -&gt;
+    writer.writeLine(&quot;URL&quot;)
+   requestUrls.each { writer.writeLine(it) }
+}
+
+</stringProp>
+          <stringProp name="WebDriverSampler.parameters"></stringProp>
+          <stringProp name="WebDriverSampler.language">groovy</stringProp>
+        </com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler>
+        <hashTree/>
+        <com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler guiclass="com.googlecode.jmeter.plugins.webdriver.sampler.gui.WebDriverSamplerGui" testclass="com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler" testname="jp@gc - WebDriver Sampler - freetext and _rsc" enabled="false">
+          <stringProp name="WebDriverSampler.script">import org.openqa.selenium.chrome.ChromeDriver
+import org.openqa.selenium.chrome.ChromeOptions
+import org.openqa.selenium.devtools.DevTools
+import org.openqa.selenium.devtools.v116.network.Network
+import org.openqa.selenium.devtools.v116.network.model.Request
+import org.openqa.selenium.WebDriver
+import java.io.File
+import java.util.Optional
+
+ChromeOptions options = new ChromeOptions()
+options.addArguments(&quot;--remote-allow-origins=*&quot;)
+options.addArguments(&quot;--disable-gpu&quot;)
+options.addArguments(&quot;--window-size=1920,1080&quot;)
+options.addArguments(&quot;--start-maximized&quot;)
+
+WebDriver driver = new ChromeDriver(options)
+
+// Start DevTools session
+DevTools devTools = ((ChromeDriver) driver).getDevTools()
+devTools.createSession()
+
+// Enable Network domain to capture requests
+devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.empty()))
+
+// List to hold [freeText, _rsc] values
+List&lt;List&lt;String&gt;&gt; paramValues = []
+
+// Add listener to extract values
+devTools.addListener(Network.requestWillBeSent(), { request -&gt;
+    Request req = request.getRequest()
+    String url = req.getUrl()
+
+    if (url.contains(&quot;_rsc=&quot;)) {
+        String freeText = &quot;&quot;
+        String rsc = &quot;&quot;
+
+        def freeTextMatch = (url =~ /[?&amp;]freeText=([^&amp;]+)/)
+        if (freeTextMatch.find()) {
+            freeText = freeTextMatch.group(1)
+        }
+
+        def rscMatch = (url =~ /[?&amp;]_rsc=([^&amp;]+)/)
+        if (rscMatch.find()) {
+            rsc = rscMatch.group(1)
+        }
+
+        paramValues.add([freeText, rsc])
+    }
+})
+
+String username = &quot;goldtest&quot;
+String password = &quot;g0ld5ive&quot;
+String baseUrl = &quot;https://www.perf-selfridges.com/GB/en/cat/?freeText=aqua&amp;srch=Y&quot;
+String authenticatedUrl = &quot;https://${username}:${password}@&quot; + baseUrl.substring(8)
+
+driver.get(authenticatedUrl)
+Thread.sleep(5000)
+
+// Write to CSV
+def csvFile = new File(&quot;C:/Network_Requests/network_requests_freetext.csv&quot;)
+csvFile.withWriter(&apos;UTF-8&apos;) { writer -&gt;
+    writer.writeLine(&quot;freeText,_rsc&quot;)
+    paramValues.each { row -&gt;
+        writer.writeLine(&quot;${row[0]},${row[1]}&quot;)
+    }
+}
+
+driver.quit()
+</stringProp>
+          <stringProp name="WebDriverSampler.parameters"></stringProp>
+          <stringProp name="WebDriverSampler.language">groovy</stringProp>
+        </com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler>
+        <hashTree/>
+        <com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler guiclass="com.googlecode.jmeter.plugins.webdriver.sampler.gui.WebDriverSamplerGui" testclass="com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler" testname="jp@gc - WebDriver Sampler - No overwriting" enabled="false">
+          <stringProp name="WebDriverSampler.script">import org.openqa.selenium.chrome.ChromeDriver
+import org.openqa.selenium.chrome.ChromeOptions
+import org.openqa.selenium.devtools.DevTools
+import org.openqa.selenium.devtools.v116.network.Network
+import org.openqa.selenium.devtools.v116.network.model.Request
+import org.openqa.selenium.WebDriver
+import java.io.File
+import java.io.FileWriter
+import java.util.Optional
+
+ChromeOptions options = new ChromeOptions()
+options.addArguments(&quot;--remote-allow-origins=*&quot;)
+options.addArguments(&quot;--disable-gpu&quot;)
+options.addArguments(&quot;--window-size=1920,1080&quot;)
+options.addArguments(&quot;--start-maximized&quot;)
+
+WebDriver driver = new ChromeDriver(options)
+
+// Start DevTools session
+DevTools devTools = ((ChromeDriver) driver).getDevTools()
+devTools.createSession()
+
+// Enable Network domain to capture requests
+devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.empty()))
+
+// List to hold [freeText, _rsc] values
+List&lt;List&lt;String&gt;&gt; paramValues = []
+
+// Add listener to extract values
+devTools.addListener(Network.requestWillBeSent(), { request -&gt;
+    Request req = request.getRequest()
+    String url = req.getUrl()
+
+    if (url.contains(&quot;_rsc=&quot;)) {
+        String freeText = &quot;&quot;
+        String rsc = &quot;&quot;
+
+        def freeTextMatch = (url =~ /[?&amp;]freeText=([^&amp;]+)/)
+        if (freeTextMatch.find()) {
+            freeText = freeTextMatch.group(1)
+        }
+
+        def rscMatch = (url =~ /[?&amp;]_rsc=([^&amp;]+)/)
+        if (rscMatch.find()) {
+            rsc = rscMatch.group(1)
+        }
+
+        paramValues.add([freeText, rsc])
+    }
+})
+
+// Visit authenticated URL
+String username = &quot;goldtest&quot;
+String password = &quot;g0ld5ive&quot;
+String baseUrl = &quot;https://www.perf-selfridges.com/GB/en/cat/?freeText=shirt&amp;srch=Y&quot;
+String authenticatedUrl = &quot;https://${username}:${password}@&quot; + baseUrl.substring(8)
+
+driver.get(authenticatedUrl)
+Thread.sleep(5000)
+
+// File path
+def csvFile = new File(&quot;C:/Network_Requests/network_requests_freetext.csv&quot;)
+boolean fileExists = csvFile.exists()
+
+// Append to the CSV
+csvFile.withWriterAppend(&apos;UTF-8&apos;) { writer -&gt;
+    if (!fileExists) {
+        writer.writeLine(&quot;freeText,_rsc&quot;) // Write header only if file didn&apos;t exist
+    }
+    paramValues.each { row -&gt;
+        writer.writeLine(&quot;${row[0]},${row[1]}&quot;)
+    }
+}
+
+driver.quit()
+</stringProp>
+          <stringProp name="WebDriverSampler.parameters"></stringProp>
+          <stringProp name="WebDriverSampler.language">groovy</stringProp>
+        </com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler>
+        <hashTree/>
+        <com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler guiclass="com.googlecode.jmeter.plugins.webdriver.sampler.gui.WebDriverSamplerGui" testclass="com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler" testname="jp@gc - WebDriver Sampler - No duplicates" enabled="false">
+          <stringProp name="WebDriverSampler.script">import org.openqa.selenium.chrome.ChromeDriver
+import org.openqa.selenium.chrome.ChromeOptions
+import org.openqa.selenium.devtools.DevTools
+import org.openqa.selenium.devtools.v116.network.Network
+import org.openqa.selenium.devtools.v116.network.model.Request
+import org.openqa.selenium.WebDriver
+import java.io.File
+import java.util.Optional
+import java.util.LinkedHashSet
+
+// Get freeText parameter safely
+String freeTextParam
+try {
+    freeTextParam = vars.get(&quot;freeText&quot;) // From JMeter variable
+} catch (MissingPropertyException e) {
+    freeTextParam = &quot;shirt&quot; // Default for local testing
+}
+
+ChromeOptions options = new ChromeOptions()
+options.addArguments(&quot;--remote-allow-origins=*&quot;)
+options.addArguments(&quot;--disable-gpu&quot;)
+options.addArguments(&quot;--window-size=1920,1080&quot;)
+options.addArguments(&quot;--start-maximized&quot;)
+
+WebDriver driver = new ChromeDriver(options)
+
+// Start DevTools session
+DevTools devTools = ((ChromeDriver) driver).getDevTools()
+devTools.createSession()
+
+// Enable Network domain to capture requests
+devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.empty()))
+
+// Use a map to store normalized key to original value for uniqueness and output
+Map&lt;String, String&gt; uniqueParamPairs = [:]
+
+// Read existing entries from CSV if file exists, to avoid duplicates across runs
+def csvFile = new File(&quot;C:/Network_Requests/network_requests_freetext.csv&quot;)
+if (csvFile.exists()) {
+    csvFile.eachLine { line -&gt;
+        if (!line.startsWith(&quot;freeText&quot;)) {  // Skip header
+            def parts = line.split(&quot;,&quot;, 2)
+            if (parts.length == 2) {
+                String normKey = parts[0].trim().toLowerCase() + &quot;,&quot; + parts[1].trim().toLowerCase()
+                uniqueParamPairs[normKey] = line.trim()  // store original line
+            }
+        }
+    }
+}
+
+// Add listener to capture new entries during this run
+devTools.addListener(Network.requestWillBeSent(), { request -&gt;
+    Request req = request.getRequest()
+    String url = req.getUrl()
+
+    if (url.contains(&quot;_rsc=&quot;)) {
+        String freeText = &quot;&quot;
+        String rsc = &quot;&quot;
+
+        def freeTextMatch = (url =~ /[?&amp;]freeText=([^&amp;]+)/)
+        if (freeTextMatch.find()) {
+            freeText = freeTextMatch.group(1)
+        }
+
+        def rscMatch = (url =~ /[?&amp;]_rsc=([^&amp;]+)/)
+        if (rscMatch.find()) {
+            rsc = rscMatch.group(1)
+        }
+
+        String normKey = freeText.trim().toLowerCase() + &quot;,&quot; + rsc.trim().toLowerCase()
+        uniqueParamPairs[normKey] = &quot;${freeText},${rsc}&quot;  // store original values
+    }
+})
+
+String username = &quot;goldtest&quot;
+String password = &quot;g0ld5ive&quot;
+String baseUrl = &quot;https://www.perf-selfridges.com/GB/en/cat/?freeText=${freeTextParam}&amp;srch=Y&quot;
+String authenticatedUrl = &quot;https://${username}:${password}@&quot; + baseUrl.substring(8)
+
+driver.get(authenticatedUrl)
+Thread.sleep(5000)
+
+// Write all unique entries back to the CSV file (overwrite)
+csvFile.withWriter(&apos;UTF-8&apos;) { writer -&gt;
+    writer.writeLine(&quot;freeText,_rsc&quot;)
+    uniqueParamPairs.values().each { writer.writeLine(it) }
+}
+
+driver.quit()
+</stringProp>
+          <stringProp name="WebDriverSampler.parameters"></stringProp>
+          <stringProp name="WebDriverSampler.language">groovy</stringProp>
+        </com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler>
+        <hashTree/>
+        <com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler guiclass="com.googlecode.jmeter.plugins.webdriver.sampler.gui.WebDriverSamplerGui" testclass="com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler" testname="jp@gc - WebDriver Sampler - freeTextParam - FInal" enabled="false">
+          <stringProp name="WebDriverSampler.script">import org.openqa.selenium.chrome.ChromeDriver
+import org.openqa.selenium.chrome.ChromeOptions
+import org.openqa.selenium.devtools.DevTools
+import org.openqa.selenium.devtools.v116.network.Network
+import org.openqa.selenium.devtools.v116.network.model.Request
+import org.openqa.selenium.WebDriver
+import java.io.File
+import java.util.Optional
+import java.util.LinkedHashSet
+
+// Get freeText parameter safely
+String freeTextParam
+try {
+    freeTextParam = vars.get(&quot;freeText&quot;) // from JMeter variable
+} catch (MissingPropertyException e) {
+    freeTextParam = &quot;jeans&quot; // default for testing outside JMeter
+}
+
+ChromeOptions options = new ChromeOptions()
+options.addArguments(&quot;--remote-allow-origins=*&quot;)
+options.addArguments(&quot;--disable-gpu&quot;)
+options.addArguments(&quot;--window-size=1920,1080&quot;)
+options.addArguments(&quot;--start-maximized&quot;)
+
+WebDriver driver = new ChromeDriver(options)
+
+// Start DevTools session
+DevTools devTools = ((ChromeDriver) driver).getDevTools()
+devTools.createSession()
+
+// Enable Network domain to capture requests
+devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.empty()))
+
+// To collect new entries this run (no filtering needed here)
+Set&lt;String&gt; newEntries = new LinkedHashSet&lt;&gt;()
+
+// Add listener to capture requests containing _rsc
+devTools.addListener(Network.requestWillBeSent(), { request -&gt;
+    Request req = request.getRequest()
+    String url = req.getUrl()
+
+    if (url.contains(&quot;_rsc=&quot;)) {
+        String freeText = &quot;&quot;
+        String rsc = &quot;&quot;
+
+        def freeTextMatch = (url =~ /[?&amp;]freeText=([^&amp;]+)/)
+        if (freeTextMatch.find()) {
+            freeText = freeTextMatch.group(1)
+        }
+
+        def rscMatch = (url =~ /[?&amp;]_rsc=([^&amp;]+)/)
+        if (rscMatch.find()) {
+            rsc = rscMatch.group(1)
+        }
+
+        newEntries.add(&quot;${freeText},${rsc}&quot;.trim())
+    }
+})
+
+String username = &quot;goldtest&quot;
+String password = &quot;g0ld5ive&quot;
+String baseUrl = &quot;https://www.perf-selfridges.com/GB/en/cat/?freeText=${freeTextParam}&amp;srch=Y&quot;
+String authenticatedUrl = &quot;https://${username}:${password}@&quot; + baseUrl.substring(8)
+
+driver.get(authenticatedUrl)
+Thread.sleep(5000)
+
+// File path
+def csvFile = new File(&quot;C:/Network_Requests/network_requests_freetext.csv&quot;)
+boolean fileExists = csvFile.exists()
+
+// Step 1: Append new entries regardless of duplicates
+csvFile.withWriterAppend(&apos;UTF-8&apos;) { writer -&gt;
+    if (!fileExists) {
+        writer.writeLine(&quot;freeText,_rsc&quot;)
+    }
+    newEntries.each { writer.writeLine(it) }
+}
+
+// Step 2: Read all lines (skip header), remove duplicates, and rewrite the file with unique entries
+def allEntries = new LinkedHashSet&lt;String&gt;()
+if (csvFile.exists()) {
+    csvFile.eachLine { line -&gt;
+        if (!line.startsWith(&quot;freeText&quot;)) {
+            allEntries.add(line.trim())
+        }
+    }
+}
+
+// Rewrite file with header and unique entries only
+csvFile.withWriter(&apos;UTF-8&apos;) { writer -&gt;
+    writer.writeLine(&quot;freeText,_rsc&quot;)
+    allEntries.each { writer.writeLine(it) }
+}
+
+driver.quit()
+</stringProp>
+          <stringProp name="WebDriverSampler.parameters"></stringProp>
+          <stringProp name="WebDriverSampler.language">groovy</stringProp>
+        </com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler>
+        <hashTree/>
+        <com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler guiclass="com.googlecode.jmeter.plugins.webdriver.sampler.gui.WebDriverSamplerGui" testclass="com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler" testname="jp@gc - WebDriver Sampler - Input CSV file">
+          <stringProp name="WebDriverSampler.script">import org.openqa.selenium.chrome.ChromeDriver
+import org.openqa.selenium.chrome.ChromeOptions
+import org.openqa.selenium.devtools.DevTools
+import org.openqa.selenium.devtools.v116.network.Network
+import org.openqa.selenium.devtools.v116.network.model.Request
+import org.openqa.selenium.WebDriver
+import java.io.File
+import java.util.Optional
+import java.util.LinkedHashSet
+
+
+def inputCsv = new File(&quot;C:/Network_Requests/freeTextValues.csv&quot;)
+
+
+def outputCsv = new File(&quot;C:/Network_Requests/network_requests_freetext.csv&quot;)
+
+// Initialize output file with header if not exists
+if (!outputCsv.exists()) {
+    outputCsv.withWriter(&apos;UTF-8&apos;) { writer -&gt;
+        writer.writeLine(&quot;freeText,_rsc&quot;)
+    }
+}
+
+// Read all freeText values from input CSV (skip header)
+def freeTextValues = []
+
+try {
+    inputCsv.withReader { reader -&gt;
+        reader.readLine() // skip header
+        reader.eachLine { line -&gt;
+            if (line.trim()) {
+                freeTextValues &lt;&lt; line.trim()
+            }
+        }
+    }
+} catch (Exception e) {
+    println(&quot;Error reading freeText CSV file, using default value: jeans&quot;)
+    freeTextValues = [&quot;jeans&quot;]
+}
+
+// Configure Chrome options once
+ChromeOptions options = new ChromeOptions()
+options.addArguments(&quot;--remote-allow-origins=*&quot;)
+options.addArguments(&quot;--disable-gpu&quot;)
+options.addArguments(&quot;--window-size=1920,1080&quot;)
+options.addArguments(&quot;--start-maximized&quot;)
+
+// Function to run the capture flow for each freeText
+void captureForFreeText(String freeTextParam, ChromeOptions options) {
+    WebDriver driver = new ChromeDriver(options)
+    DevTools devTools = ((ChromeDriver) driver).getDevTools()
+    devTools.createSession()
+
+    devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.empty()))
+
+    Set&lt;String&gt; newEntries = new LinkedHashSet&lt;&gt;()
+
+    devTools.addListener(Network.requestWillBeSent(), { request -&gt;
+        Request req = request.getRequest()
+        String url = req.getUrl()
+
+        if (url.contains(&quot;_rsc=&quot;)) {
+            String freeText = &quot;&quot;
+            String rsc = &quot;&quot;
+
+            def freeTextMatch = (url =~ /[?&amp;]freeText=([^&amp;]+)/)
+            if (freeTextMatch.find()) {
+                freeText = freeTextMatch.group(1)
+            }
+
+            def rscMatch = (url =~ /[?&amp;]_rsc=([^&amp;]+)/)
+            if (rscMatch.find()) {
+                rsc = rscMatch.group(1)
+            }
+
+            newEntries.add(&quot;${freeText},${rsc}&quot;.trim())
+        }
+    })
+
+    String username = &quot;goldtest&quot;
+    String password = &quot;g0ld5ive&quot;
+    String baseUrl = &quot;https://www.perf-selfridges.com/GB/en/cat/?freeText=${freeTextParam}&amp;srch=Y&quot;
+    String authenticatedUrl = &quot;https://${username}:${password}@&quot; + baseUrl.substring(8)
+
+    driver.get(authenticatedUrl)
+    Thread.sleep(5000)
+
+    // Append new entries to CSV
+    outputCsv.withWriterAppend(&apos;UTF-8&apos;) { writer -&gt;
+        newEntries.each { writer.writeLine(it) }
+    }
+
+    driver.quit()
+}
+
+// Run capture for all freeText values from CSV
+freeTextValues.each { ft -&gt;
+    captureForFreeText(ft, options)
+}
+
+
+// After all runs, remove duplicates from output CSV
+
+def allEntries = new LinkedHashSet&lt;String&gt;()
+outputCsv.eachLine { line -&gt;
+    if (!line.startsWith(&quot;freeText&quot;)) {
+        allEntries.add(line.trim())
+    }
+}
+
+outputCsv.withWriter(&apos;UTF-8&apos;) { writer -&gt;
+    writer.writeLine(&quot;freeText,_rsc&quot;)
+    allEntries.each { writer.writeLine(it) }
+}
+</stringProp>
+          <stringProp name="WebDriverSampler.parameters"></stringProp>
+          <stringProp name="WebDriverSampler.language">groovy</stringProp>
+        </com.googlecode.jmeter.plugins.webdriver.sampler.WebDriverSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>
