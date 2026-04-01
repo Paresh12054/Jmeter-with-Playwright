@@ -26,7 +26,7 @@ jobs:
 
       - name: Run Playwright Test
         run: |
-          npx playwright test Demo1.spec.ts
+          npx playwright test tests/Demo1.spec.ts
 
       - name: Upload Playwright Report
         if: always()
