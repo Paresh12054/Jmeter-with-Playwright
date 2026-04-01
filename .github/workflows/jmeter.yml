@@ -20,7 +20,7 @@ jobs:
 
       - name: Run JMeter Test
         run: |
-          ./jmeter/bin/jmeter -n -t GithubTest.jmx -l results.jtl
+          ./jmeter/bin/jmeter -n -t scripts/GithubTest.jmx -l results.jtl
 
       - name: Generate HTML Report
         run: |
