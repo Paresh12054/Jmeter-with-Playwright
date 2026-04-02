@@ -1,4 +1,4 @@
-name: JMeter + Playwright + Confluence Combined Pipeline
+name: JMeter + Playwright + Confluence Combined Pipeline with Confluence Report
 
 on:
   workflow_dispatch:
@@ -8,21 +8,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # -------------------------
-      # Checkout
-      # -------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # -------------------------
-      # Setup Node
+      # Setup Node (Playwright)
       # -------------------------
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install Dependencies
+      - name: Install Node Dependencies
         run: npm install
 
       - name: Install Playwright Browsers
@@ -47,26 +44,36 @@ jobs:
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright periodically (JSON output)
+      # Run Playwright periodically
       # -------------------------
       - name: Run Playwright periodically
         run: |
           END=$((SECONDS+600))
-
-          mkdir -p playwright-results
+          PASSED=0
+          FAILED=0
 
           while [ $SECONDS -lt $END ]; do
             TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 
             echo "Running Playwright tests at $TIMESTAMP..."
 
-            npx playwright test tests/Demo1.spec.ts \
-              --reporter=json \
-              --output=playwright-results/$TIMESTAMP.json || true
+            RESULT_FILE="pw-result-$TIMESTAMP.json"
+
+            npx playwright test tests/Demo1.spec.ts --reporter=json > $RESULT_FILE || true
+
+            # Extract pass/fail counts
+            P=$(grep -o '"status":"passed"' $RESULT_FILE | wc -l)
+            F=$(grep -o '"status":"failed"' $RESULT_FILE | wc -l)
+
+            PASSED=$((PASSED + P))
+            FAILED=$((FAILED + F))
 
             echo "Sleeping for 3 minutes..."
             sleep 180
           done
+
+          echo $PASSED > pw_passed.txt
+          echo $FAILED > pw_failed.txt
 
       # -------------------------
       # Stop JMeter
@@ -76,47 +83,22 @@ jobs:
           kill $(cat jmeter.pid) || true
 
       # -------------------------
-      # Generate JMeter HTML Report
+      # Generate JMeter Report
       # -------------------------
-      - name: Generate JMeter Report
+      - name: Generate JMeter HTML Report
         run: |
           ./jmeter/bin/jmeter -g results.jtl -o report
 
       # -------------------------
-      # Extract Metrics
+      # Extract JMeter Metrics
       # -------------------------
-      - name: Extract Metrics
+      - name: Extract JMeter Metrics
         run: |
-          echo "Extracting JMeter metrics..."
+          AVG_RESPONSE=$(grep -oP 'summary =.*?Avg=\K[0-9]+' jmeter.log | tail -1 || echo "N/A")
+          ERROR_PERCENT=$(grep -oP 'Err:\s*\K[0-9.]+' jmeter.log | tail -1 || echo "N/A")
 
-          TOTAL=$(grep -c "<httpSample" results.jtl || true)
-          FAILURES=$(grep -c 's="false"' results.jtl || true)
-
-          if [ "$TOTAL" -eq 0 ]; then TOTAL=1; fi
-
-          ERROR_PERCENT=$(awk "BEGIN {printf \"%.2f\", ($FAILURES/$TOTAL)*100}")
-          AVG_RESPONSE=$(awk -F't="' '{sum+=$2; count++} END {if(count>0) print int(sum/count); else print 0}' results.jtl)
-
-          echo "JMETER_TOTAL=$TOTAL" >> $GITHUB_ENV
-          echo "JMETER_FAILURES=$FAILURES" >> $GITHUB_ENV
-          echo "JMETER_ERROR_PERCENT=$ERROR_PERCENT" >> $GITHUB_ENV
-          echo "JMETER_AVG_RESPONSE=$AVG_RESPONSE" >> $GITHUB_ENV
-
-          echo "Extracting Playwright metrics..."
-
-          PASSED=$(grep -h '"status":"passed"' playwright-results/*.json 2>/dev/null | wc -l || true)
-          FAILED=$(grep -h '"status":"failed"' playwright-results/*.json 2>/dev/null | wc -l || true)
-
-          echo "PW_PASSED=$PASSED" >> $GITHUB_ENV
-          echo "PW_FAILED=$FAILED" >> $GITHUB_ENV
-
-      # -------------------------
-      # Zip Reports
-      # -------------------------
-      - name: Zip Reports
-        run: |
-          zip -r jmeter-report.zip report
-          zip -r playwright-results.zip playwright-results/
+          echo $AVG_RESPONSE > avg_response.txt
+          echo $ERROR_PERCENT > error_percent.txt
 
       # -------------------------
       # Upload Artifacts
@@ -125,58 +107,56 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jmeter-report
-          path: report/
+          path: report
 
-      - name: Upload Playwright Results
-        if: always()
+      - name: Upload Playwright Reports
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-results
-          path: playwright-results/
+          name: playwright-reports
+          path: pw-result-*.json
 
       # -------------------------
-      # Publish to Confluence
+      # Create Confluence Report
       # -------------------------
       - name: Publish Results to Confluence
-        if: always()
+        shell: bash
         run: |
           TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
-          PAGE_TITLE="Performance Test Report - $TIMESTAMP"
 
-          GITHUB_RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          AVG_RESPONSE=$(cat avg_response.txt)
+          ERROR_PERCENT=$(cat error_percent.txt)
+          PW_PASSED=$(cat pw_passed.txt)
+          PW_FAILED=$(cat pw_failed.txt)
 
-          CONTENT="<h1>Performance Test Results</h1>
-          <p><b>Execution Time:</b> $TIMESTAMP</p>
+          CONTENT="<h1>Automated Test Report</h1>
+          <p><b>Timestamp:</b> $TIMESTAMP</p>
 
           <h2>JMeter Metrics</h2>
           <ul>
-            <li>Total Requests: $JMETER_TOTAL</li>
-            <li>Failures: $JMETER_FAILURES</li>
-            <li>Error %: $JMETER_ERROR_PERCENT%</li>
-            <li>Avg Response Time: $JMETER_AVG_RESPONSE ms</li>
+            <li>Average Response Time: $AVG_RESPONSE ms</li>
+            <li>Error Percentage: $ERROR_PERCENT %</li>
           </ul>
 
           <h2>Playwright Results</h2>
           <ul>
             <li>Passed: $PW_PASSED</li>
             <li>Failed: $PW_FAILED</li>
-          </ul>
-
-          <h2>Reports</h2>
-          <ul>
-            <li><a href='$GITHUB_RUN_URL'>View Full GitHub Run</a></li>
           </ul>"
+
+          ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | sed 's/"/\\"/g')
 
           curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "Content-Type: application/json" \
             -d "{
               \"type\": \"page\",
-              \"title\": \"$PAGE_TITLE\",
-              \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
+              \"title\": \"Test Report - $TIMESTAMP\",
+              \"space\": {
+                \"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"
+              },
               \"body\": {
                 \"storage\": {
-                  \"value\": \"$CONTENT\",
+                  \"value\": \"$ESCAPED_CONTENT\",
                   \"representation\": \"storage\"
                 }
               }
