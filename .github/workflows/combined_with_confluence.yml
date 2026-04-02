@@ -143,7 +143,7 @@ jobs:
             <li>Failed: $PW_FAILED</li>
           </ul>"
 
-          ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | sed 's/"/\\"/g')
+          ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | awk '{printf "%s\\n", $0}')
 
           curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
