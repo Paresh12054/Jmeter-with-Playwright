@@ -40,7 +40,7 @@ jobs:
       # -------------------------
       - name: Start JMeter Test
         run: |
-          ./jmeter/bin/jmeter -n -t GithubTest_combined.jmx -l results.jtl -Jduration=600 &
+          ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 &
           echo $! > jmeter.pid
 
       # -------------------------
