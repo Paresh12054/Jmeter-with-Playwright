@@ -8,18 +8,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # -------------------------
+      # Checkout
+      # -------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # -------------------------
-      # Setup Node (Playwright)
+      # Setup Node
       # -------------------------
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install Node Dependencies
+      - name: Install Dependencies
         run: npm install
 
       - name: Install Playwright Browsers
@@ -61,12 +64,13 @@ jobs:
 
             npx playwright test tests/Demo1.spec.ts --reporter=json > $RESULT_FILE || true
 
-            # Extract pass/fail counts
-            P=$(grep -o '"status":"passed"' $RESULT_FILE | wc -l)
-            F=$(grep -o '"status":"failed"' $RESULT_FILE | wc -l)
+            if [ -f "$RESULT_FILE" ]; then
+              P=$(grep -o '"status":"passed"' $RESULT_FILE | wc -l)
+              F=$(grep -o '"status":"failed"' $RESULT_FILE | wc -l)
 
-            PASSED=$((PASSED + P))
-            FAILED=$((FAILED + F))
+              PASSED=$((PASSED + P))
+              FAILED=$((FAILED + F))
+            fi
 
             echo "Sleeping for 3 minutes..."
             sleep 180
@@ -90,15 +94,47 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o report
 
       # -------------------------
-      # Extract JMeter Metrics
+      # Extract JMeter Metrics (FIXED)
       # -------------------------
       - name: Extract JMeter Metrics
         run: |
-          AVG_RESPONSE=$(grep -oP 'summary =.*?Avg=\K[0-9]+' jmeter.log | tail -1 || echo "N/A")
-          ERROR_PERCENT=$(grep -oP 'Err:\s*\K[0-9.]+' jmeter.log | tail -1 || echo "N/A")
+          echo "Parsing JMeter results.jtl..."
+
+          TOTAL=$(grep -c "<httpSample" results.jtl || true)
+          FAILURES=$(grep -c 's="false"' results.jtl || true)
+
+          if [ "$TOTAL" -eq 0 ]; then TOTAL=1; fi
+
+          ERROR_PERCENT=$(awk "BEGIN {printf \"%.2f\", ($FAILURES/$TOTAL)*100}")
+
+          AVG_RESPONSE=$(awk -F't="' '{sum+=$2; count++} END {if(count>0) print int(sum/count); else print 0}' results.jtl)
 
           echo $AVG_RESPONSE > avg_response.txt
           echo $ERROR_PERCENT > error_percent.txt
+
+          echo "JMeter Avg Response: $AVG_RESPONSE"
+          echo "JMeter Error %: $ERROR_PERCENT"
+
+      # -------------------------
+      # DEBUG STEP (VERY IMPORTANT)
+      # -------------------------
+      - name: Debug Metrics & Files
+        run: |
+          echo "===== FILE LIST ====="
+          ls -l
+
+          echo "===== JMeter Files ====="
+          ls -l results.jtl || true
+          ls -l jmeter.log || true
+
+          echo "===== Playwright JSON Files ====="
+          ls -l pw-result-*.json || true
+
+          echo "===== Metric Files ====="
+          cat avg_response.txt || echo "avg_response missing"
+          cat error_percent.txt || echo "error_percent missing"
+          cat pw_passed.txt || echo "pw_passed missing"
+          cat pw_failed.txt || echo "pw_failed missing"
 
       # -------------------------
       # Upload Artifacts
@@ -109,14 +145,14 @@ jobs:
           name: jmeter-report
           path: report
 
-      - name: Upload Playwright Reports
+      - name: Upload Playwright Results
         uses: actions/upload-artifact@v4
         with:
           name: playwright-reports
           path: pw-result-*.json
 
       # -------------------------
-      # Create Confluence Report
+      # Publish to Confluence (FIXED)
       # -------------------------
       - name: Publish Results to Confluence
         shell: bash
