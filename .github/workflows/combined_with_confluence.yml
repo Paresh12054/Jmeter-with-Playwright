@@ -15,14 +15,14 @@ jobs:
         uses: actions/checkout@v4
 
       # -------------------------
-      # Setup Node (Playwright)
+      # Setup Node
       # -------------------------
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install Node Dependencies
+      - name: Install Dependencies
         run: npm install
 
       - name: Install Playwright Browsers
@@ -39,7 +39,7 @@ jobs:
           mv apache-jmeter-$JMETER_VERSION jmeter
 
       # -------------------------
-      # Start JMeter (Background)
+      # Start JMeter
       # -------------------------
       - name: Start JMeter Test
         run: |
@@ -47,23 +47,22 @@ jobs:
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright periodically
+      # Run Playwright periodically (JSON output)
       # -------------------------
       - name: Run Playwright periodically
         run: |
           END=$((SECONDS+600))
+
+          mkdir -p playwright-results
 
           while [ $SECONDS -lt $END ]; do
             TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 
             echo "Running Playwright tests at $TIMESTAMP..."
 
-            # Run with JSON reporter for parsing
-            npx playwright test tests/Demo1.spec.ts --reporter=json || true
-
-            # Save JSON output
-            mkdir -p playwright-results-$TIMESTAMP
-            mv test-results.json playwright-results-$TIMESTAMP/results.json 2>/dev/null || true
+            npx playwright test tests/Demo1.spec.ts \
+              --reporter=json \
+              --output=playwright-results/$TIMESTAMP.json || true
 
             echo "Sleeping for 3 minutes..."
             sleep 180
@@ -79,7 +78,7 @@ jobs:
       # -------------------------
       # Generate JMeter HTML Report
       # -------------------------
-      - name: Generate HTML Report
+      - name: Generate JMeter Report
         run: |
           ./jmeter/bin/jmeter -g results.jtl -o report
 
@@ -88,7 +87,7 @@ jobs:
       # -------------------------
       - name: Extract Metrics
         run: |
-          echo "Parsing JMeter results..."
+          echo "Extracting JMeter metrics..."
 
           TOTAL=$(grep -c "<httpSample" results.jtl || true)
           FAILURES=$(grep -c 's="false"' results.jtl || true)
@@ -96,7 +95,6 @@ jobs:
           if [ "$TOTAL" -eq 0 ]; then TOTAL=1; fi
 
           ERROR_PERCENT=$(awk "BEGIN {printf \"%.2f\", ($FAILURES/$TOTAL)*100}")
-
           AVG_RESPONSE=$(awk -F't="' '{sum+=$2; count++} END {if(count>0) print int(sum/count); else print 0}' results.jtl)
 
           echo "JMETER_TOTAL=$TOTAL" >> $GITHUB_ENV
@@ -104,10 +102,10 @@ jobs:
           echo "JMETER_ERROR_PERCENT=$ERROR_PERCENT" >> $GITHUB_ENV
           echo "JMETER_AVG_RESPONSE=$AVG_RESPONSE" >> $GITHUB_ENV
 
-          echo "Parsing Playwright results..."
+          echo "Extracting Playwright metrics..."
 
-          PASSED=$(grep -o '"status":"passed"' playwright-results-*/results.json 2>/dev/null | wc -l || true)
-          FAILED=$(grep -o '"status":"failed"' playwright-results-*/results.json 2>/dev/null | wc -l || true)
+          PASSED=$(grep -h '"status":"passed"' playwright-results/*.json 2>/dev/null | wc -l || true)
+          FAILED=$(grep -h '"status":"failed"' playwright-results/*.json 2>/dev/null | wc -l || true)
 
           echo "PW_PASSED=$PASSED" >> $GITHUB_ENV
           echo "PW_FAILED=$FAILED" >> $GITHUB_ENV
@@ -118,7 +116,7 @@ jobs:
       - name: Zip Reports
         run: |
           zip -r jmeter-report.zip report
-          zip -r playwright-results.zip playwright-results-* || true
+          zip -r playwright-results.zip playwright-results/
 
       # -------------------------
       # Upload Artifacts
@@ -127,14 +125,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jmeter-report
-          path: report
+          path: report/
 
       - name: Upload Playwright Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-results
-          path: playwright-results-*
+          path: playwright-results/
 
       # -------------------------
       # Publish to Confluence
@@ -166,7 +164,7 @@ jobs:
 
           <h2>Reports</h2>
           <ul>
-            <li><a href='$GITHUB_RUN_URL'>View Full GitHub Run & Download Reports</a></li>
+            <li><a href='$GITHUB_RUN_URL'>View Full GitHub Run</a></li>
           </ul>"
 
           curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
