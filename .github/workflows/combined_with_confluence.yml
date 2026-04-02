@@ -145,6 +145,12 @@ jobs:
           name: jmeter-report
           path: report
 
+      - name: Upload JMeter Raw Results (JTL)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmeter-jtl
+          path: results.jtl
+
       - name: Upload Playwright Results
         uses: actions/upload-artifact@v4
         with:
