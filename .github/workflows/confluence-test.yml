@@ -1,0 +1,37 @@
+name: Confluence Connection Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-confluence:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Test Confluence API Connection
+        run: |
+          TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+          PAGE_TITLE="GitHub Connection Test - $TIMESTAMP"
+
+          CONTENT="<h1>Connection Successful ✅</h1>
+          <p>This page was created from GitHub Actions.</p>
+          <p><b>Timestamp:</b> $TIMESTAMP</p>"
+
+          RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"type\": \"page\",
+              \"title\": \"$PAGE_TITLE\",
+              \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
+              \"body\": {
+                \"storage\": {
+                  \"value\": \"$CONTENT\",
+                  \"representation\": \"storage\"
+                }
+              }
+            }" \
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
+
+          echo "Response:"
+          echo "$RESPONSE"
