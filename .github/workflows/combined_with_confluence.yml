@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       # -------------------------
-      # Setup Node
+      # Setup Node (Playwright)
       # -------------------------
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -72,7 +72,6 @@ jobs:
               FAILED=$((FAILED + F))
             fi
 
-            echo "Sleeping for 3 minutes..."
             sleep 180
           done
 
@@ -94,47 +93,48 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o report
 
       # -------------------------
-      # Extract JMeter Metrics (FIXED)
+      # Extract JMeter Metrics (CSV + P90/P95)
       # -------------------------
       - name: Extract JMeter Metrics
         run: |
-          echo "Parsing JMeter results.jtl..."
+          echo "Parsing JMeter CSV results..."
 
-          TOTAL=$(grep -c "<httpSample" results.jtl || true)
-          FAILURES=$(grep -c 's="false"' results.jtl || true)
+          TOTAL=$(($(wc -l < results.jtl) - 1))
+          FAILURES=$(awk -F',' 'NR>1 && $8 != "true" {count++} END {print count+0}' results.jtl)
+
+          AVG_RESPONSE=$(awk -F',' 'NR>1 {sum+=$2; count++} END {if(count>0) print int(sum/count); else print 0}' results.jtl)
+
+          # Percentiles
+          P90=$(awk -F',' 'NR>1 {print $2}' results.jtl | sort -n | awk '{a[NR]=$1} END {print a[int(NR*0.9)]}')
+          P95=$(awk -F',' 'NR>1 {print $2}' results.jtl | sort -n | awk '{a[NR]=$1} END {print a[int(NR*0.95)]}')
 
           if [ "$TOTAL" -eq 0 ]; then TOTAL=1; fi
-
           ERROR_PERCENT=$(awk "BEGIN {printf \"%.2f\", ($FAILURES/$TOTAL)*100}")
-
-          AVG_RESPONSE=$(awk -F't="' '{sum+=$2; count++} END {if(count>0) print int(sum/count); else print 0}' results.jtl)
 
           echo $AVG_RESPONSE > avg_response.txt
           echo $ERROR_PERCENT > error_percent.txt
+          echo $P90 > p90.txt
+          echo $P95 > p95.txt
 
-          echo "JMeter Avg Response: $AVG_RESPONSE"
-          echo "JMeter Error %: $ERROR_PERCENT"
+          echo "Total: $TOTAL"
+          echo "Failures: $FAILURES"
+          echo "Avg: $AVG_RESPONSE"
+          echo "P90: $P90"
+          echo "P95: $P95"
+          echo "Error %: $ERROR_PERCENT"
 
       # -------------------------
-      # DEBUG STEP (VERY IMPORTANT)
+      # Debug Step
       # -------------------------
-      - name: Debug Metrics & Files
+      - name: Debug Metrics
         run: |
-          echo "===== FILE LIST ====="
-          ls -l
-
-          echo "===== JMeter Files ====="
-          ls -l results.jtl || true
-          ls -l jmeter.log || true
-
-          echo "===== Playwright JSON Files ====="
-          ls -l pw-result-*.json || true
-
-          echo "===== Metric Files ====="
-          cat avg_response.txt || echo "avg_response missing"
-          cat error_percent.txt || echo "error_percent missing"
-          cat pw_passed.txt || echo "pw_passed missing"
-          cat pw_failed.txt || echo "pw_failed missing"
+          echo "===== Metrics ====="
+          cat avg_response.txt
+          cat error_percent.txt
+          cat p90.txt
+          cat p95.txt
+          cat pw_passed.txt
+          cat pw_failed.txt
 
       # -------------------------
       # Upload Artifacts
@@ -145,7 +145,7 @@ jobs:
           name: jmeter-report
           path: report
 
-      - name: Upload JMeter Raw Results (JTL)
+      - name: Upload JMeter JTL
         uses: actions/upload-artifact@v4
         with:
           name: jmeter-jtl
@@ -158,7 +158,7 @@ jobs:
           path: pw-result-*.json
 
       # -------------------------
-      # Publish to Confluence (FIXED)
+      # Publish to Confluence
       # -------------------------
       - name: Publish Results to Confluence
         shell: bash
@@ -167,6 +167,8 @@ jobs:
 
           AVG_RESPONSE=$(cat avg_response.txt)
           ERROR_PERCENT=$(cat error_percent.txt)
+          P90=$(cat p90.txt)
+          P95=$(cat p95.txt)
           PW_PASSED=$(cat pw_passed.txt)
           PW_FAILED=$(cat pw_failed.txt)
 
@@ -176,6 +178,8 @@ jobs:
           <h2>JMeter Metrics</h2>
           <ul>
             <li>Average Response Time: $AVG_RESPONSE ms</li>
+            <li>P90 Response Time: $P90 ms</li>
+            <li>P95 Response Time: $P95 ms</li>
             <li>Error Percentage: $ERROR_PERCENT %</li>
           </ul>
 
