@@ -1,4 +1,4 @@
-name: JMeter + Playwright Combined Pipeline
+name: JMeter + Playwright + Confluence Combined Pipeline
 
 on:
   workflow_dispatch:
