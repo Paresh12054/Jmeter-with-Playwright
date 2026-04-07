@@ -1,4 +1,4 @@
-name: JMeter + Playwright + Confluence Combined Pipeline with Confluence Report
+name: JMeter + Playwright + Confluence Final
 
 on:
   workflow_dispatch:
@@ -11,52 +11,42 @@ jobs:
       # -------------------------
       # Checkout
       # -------------------------
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       # -------------------------
-      # Install jq
+      # Install tools
       # -------------------------
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - run: sudo apt-get update && sudo apt-get install -y jq
 
-      # -------------------------
-      # Setup Node
-      # -------------------------
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+      - run: npm install
+      - run: npx playwright install --with-deps
 
       # -------------------------
       # Install JMeter
       # -------------------------
-      - name: Install JMeter
-        run: |
-          JMETER_VERSION=5.6.3
-          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-$JMETER_VERSION.tgz
-          tar -xzf apache-jmeter-$JMETER_VERSION.tgz
-          mv apache-jmeter-$JMETER_VERSION jmeter
+      - run: |
+          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.tgz
+          tar -xzf apache-jmeter-5.6.3.tgz
+          mv apache-jmeter-5.6.3 jmeter
 
       # -------------------------
       # Start JMeter
       # -------------------------
-      - name: Start JMeter Test
-        run: |
+      - run: |
           nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright periodically
+      # Run Playwright (FIXED)
       # -------------------------
       - name: Run Playwright periodically
         run: |
+          mkdir -p pw-results
+
           END=$((SECONDS+600))
           PASSED=0
           FAILED=0
@@ -64,171 +54,133 @@ jobs:
           START_TIME=$(date +%s)
 
           while [ $SECONDS -lt $END ]; do
-            TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-            RESULT_FILE="pw-result-$TIMESTAMP.json"
+            TS=$(date +"%Y-%m-%d_%H-%M-%S")
+            OUT="pw-results/result-$TS.json"
 
-            npx playwright test tests/Demo1.spec.ts --reporter=json > $RESULT_FILE || true
+            npx playwright test tests/Demo1.spec.ts \
+              --reporter=json \
+              --output=pw-results \
+              > "$OUT" || true
 
-            if [ -f "$RESULT_FILE" ]; then
-              P=$(jq '[.. | objects | select(.status=="passed")] | length' $RESULT_FILE)
-              F=$(jq '[.. | objects | select(.status=="failed")] | length' $RESULT_FILE)
+            if [ -s "$OUT" ]; then
+              P=$(jq '[.. | objects | select(.status=="passed")] | length' "$OUT")
+              F=$(jq '[.. | objects | select(.status=="failed")] | length' "$OUT")
 
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
+            else
+              echo "⚠️ Empty report: $OUT"
             fi
 
             sleep 180
           done
 
           END_TIME=$(date +%s)
-          PW_DURATION=$((END_TIME - START_TIME))
 
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
-          echo $PW_DURATION > pw_duration.txt
+          echo $((END_TIME - START_TIME)) > pw_duration.txt
 
       # -------------------------
       # Stop JMeter
       # -------------------------
-      - name: Stop JMeter
-        run: |
-          kill $(cat jmeter.pid) || true
+      - run: kill $(cat jmeter.pid) || true
 
       # -------------------------
-      # Generate JMeter Report
+      # Extract JMeter Metrics
       # -------------------------
-      - name: Generate JMeter HTML Report
-        run: |
-          ./jmeter/bin/jmeter -g results.jtl -o report
-
-      # -------------------------
-      # Extract JMeter Metrics (CSV)
-      # -------------------------
-      - name: Extract JMeter Metrics
-        run: |
+      - run: |
           TOTAL=$(($(wc -l < results.jtl) - 1))
-          FAILURES=$(awk -F',' 'NR>1 && $8 != "true" {count++} END {print count+0}' results.jtl)
+          FAIL=$(awk -F',' 'NR>1 && $8!="true"{c++}END{print c+0}' results.jtl)
 
-          AVG_RESPONSE=$(awk -F',' 'NR>1 {sum+=$2; count++} END {print int(sum/count)}' results.jtl)
+          AVG=$(awk -F',' 'NR>1{sum+=$2;c++}END{print int(sum/c)}' results.jtl)
 
-          P90=$(awk -F',' 'NR>1 {print $2}' results.jtl | sort -n | awk '{a[NR]=$1} END {print a[int(NR*0.9)]}')
-          P95=$(awk -F',' 'NR>1 {print $2}' results.jtl | sort -n | awk '{a[NR]=$1} END {print a[int(NR*0.95)]}')
+          P90=$(awk -F',' 'NR>1{print $2}' results.jtl | sort -n | awk '{a[NR]=$1}END{print a[int(NR*0.9)]}')
+          P95=$(awk -F',' 'NR>1{print $2}' results.jtl | sort -n | awk '{a[NR]=$1}END{print a[int(NR*0.95)]}')
 
-          USERS=$(awk -F',' 'NR>1 {if($13>max) max=$13} END {print max+0}' results.jtl)
+          USERS=$(awk -F',' 'NR>1{if($13>m)m=$13}END{print m+0}' results.jtl)
 
-          START=$(awk -F',' 'NR==2 {print $1}' results.jtl)
-          END=$(awk -F',' 'END {print $1}' results.jtl)
+          START=$(awk -F',' 'NR==2{print $1}' results.jtl)
+          END=$(awk -F',' 'END{print $1}' results.jtl)
 
-          if [ -z "$START" ] || [ -z "$END" ]; then
-            DURATION=0
-          else
-            DURATION=$(( (END - START) / 1000 ))
-          fi
+          DUR=$(( (END-START)/1000 ))
+          [ "$DUR" -eq 0 ] && DUR=1
 
-          if [ "$DURATION" -eq 0 ]; then DURATION=1; fi
-          THROUGHPUT=$(awk "BEGIN {printf \"%.2f\", ($TOTAL/$DURATION)}")
-          ERROR_PERCENT=$(awk "BEGIN {printf \"%.2f\", ($FAILURES/$TOTAL)*100}")
+          THR=$(awk "BEGIN {printf \"%.2f\", ($TOTAL/$DUR)}")
+          ERR=$(awk "BEGIN {printf \"%.2f\", ($FAIL/$TOTAL)*100}")
 
-          echo $AVG_RESPONSE > avg_response.txt
-          echo $ERROR_PERCENT > error_percent.txt
+          echo $AVG > avg.txt
+          echo $ERR > err.txt
           echo $P90 > p90.txt
           echo $P95 > p95.txt
           echo $USERS > users.txt
-          echo $DURATION > duration.txt
-          echo $THROUGHPUT > throughput.txt
+          echo $DUR > dur.txt
+          echo $THR > thr.txt
           echo $TOTAL > total.txt
-          echo $FAILURES > failures.txt
+          echo $FAIL > fail.txt
 
       # -------------------------
       # Debug
       # -------------------------
-      - name: Debug Files
-        run: |
-          echo "===== FILE CHECK ====="
-          ls -l
-          ls -l results.jtl || echo "Missing JTL"
-          ls -l pw-result-*.json || echo "No PW files"
+      - run: |
+          echo "===== FILES ====="
+          ls -R
 
       # -------------------------
-      # Publish to Confluence + Attachments
+      # Upload Artifacts (FIXED)
       # -------------------------
-      - name: Publish Results to Confluence
-        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jmeter-results
+          path: results.jtl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: pw-results
+
+      # -------------------------
+      # Publish to Confluence
+      # -------------------------
+      - name: Publish
         run: |
-          TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+          TS=$(date +"%Y-%m-%d %H:%M:%S")
 
-          AVG_RESPONSE=$(cat avg_response.txt)
-          ERROR_PERCENT=$(cat error_percent.txt)
-          P90=$(cat p90.txt)
-          P95=$(cat p95.txt)
-          USERS=$(cat users.txt)
-          DURATION=$(cat duration.txt)
-          THROUGHPUT=$(cat throughput.txt)
-          TOTAL=$(cat total.txt)
-          FAILURES=$(cat failures.txt)
+          CONTENT="<h1>Report</h1><p>$TS</p>"
 
-          PW_PASSED=$(cat pw_passed.txt)
-          PW_FAILED=$(cat pw_failed.txt)
-          PW_DURATION=$(cat pw_duration.txt)
+          BODY=$(printf '%s' "$CONTENT" | awk '{printf "%s\\n",$0}')
 
-          CONTENT="<h1>Performance & UI Test Report</h1>
-          <p><b>Execution Time:</b> $TIMESTAMP</p>
+          RES=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"type\":\"page\",
+            \"title\":\"Report - $TS\",
+            \"space\":{\"key\":\"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
+            \"body\":{\"storage\":{\"value\":\"$BODY\",\"representation\":\"storage\"}}
+          }" \
+          "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
 
-          <h2>JMeter Metrics</h2>
-          <table border='1'>
-          <tr><th>Metric</th><th>Value</th></tr>
-          <tr><td>Total Requests</td><td>$TOTAL</td></tr>
-          <tr><td>Failures</td><td>$FAILURES</td></tr>
-          <tr><td>Error %</td><td>$ERROR_PERCENT %</td></tr>
-          <tr><td>Avg</td><td>$AVG_RESPONSE ms</td></tr>
-          <tr><td>P90</td><td>$P90 ms</td></tr>
-          <tr><td>P95</td><td>$P95 ms</td></tr>
-          <tr><td>Throughput</td><td>$THROUGHPUT req/sec</td></tr>
-          <tr><td>Users</td><td>$USERS</td></tr>
-          <tr><td>Duration</td><td>$DURATION sec</td></tr>
-          </table>
+          ID=$(echo "$RES" | jq -r '.id')
 
-          <h2>Playwright Results</h2>
-          <table border='1'>
-          <tr><th>Metric</th><th>Value</th></tr>
-          <tr><td>Passed</td><td>$PW_PASSED</td></tr>
-          <tr><td>Failed</td><td>$PW_FAILED</td></tr>
-          <tr><td>Duration</td><td>$PW_DURATION sec</td></tr>
-          </table>"
+          echo "Page ID: $ID"
 
-          ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | awk '{printf "%s\\n", $0}')
-
-          RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"type\": \"page\",
-              \"title\": \"Performance Report - $TIMESTAMP\",
-              \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
-              \"body\": {\"storage\": {\"value\": \"$ESCAPED_CONTENT\",\"representation\": \"storage\"}}
-            }" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
-
-          PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
-
-          echo "Page ID: $PAGE_ID"
-
-          echo "Uploading results.jtl..."
+          echo "Uploading JTL..."
           curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             -F "type=attachment" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/${PAGE_ID}/child/attachment"
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$ID/child/attachment"
 
-          echo "Uploading Playwright reports..."
-          for file in pw-result-*.json; do
-            if [ -f "$file" ]; then
+          echo "Uploading PW folder..."
+          for f in pw-results/*.json; do
+            if [ -f "$f" ]; then
               curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
                 -X POST \
                 -H "X-Atlassian-Token: no-check" \
-                -F "file=@$file" \
+                -F "file=@$f" \
                 -F "type=attachment" \
-                "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/${PAGE_ID}/child/attachment"
+                "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$ID/child/attachment"
             fi
           done
