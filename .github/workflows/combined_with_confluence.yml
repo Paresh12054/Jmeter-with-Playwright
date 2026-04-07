@@ -102,7 +102,7 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o report
 
       # -------------------------
-      # Extract JMeter Metrics
+      # Extract JMeter Metrics (CSV)
       # -------------------------
       - name: Extract JMeter Metrics
         run: |
@@ -157,7 +157,44 @@ jobs:
         run: |
           TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
-          CONTENT="<h1>Performance Report</h1><p>$TIMESTAMP</p>"
+          AVG_RESPONSE=$(cat avg_response.txt)
+          ERROR_PERCENT=$(cat error_percent.txt)
+          P90=$(cat p90.txt)
+          P95=$(cat p95.txt)
+          USERS=$(cat users.txt)
+          DURATION=$(cat duration.txt)
+          THROUGHPUT=$(cat throughput.txt)
+          TOTAL=$(cat total.txt)
+          FAILURES=$(cat failures.txt)
+
+          PW_PASSED=$(cat pw_passed.txt)
+          PW_FAILED=$(cat pw_failed.txt)
+          PW_DURATION=$(cat pw_duration.txt)
+
+          CONTENT="<h1>Performance & UI Test Report</h1>
+          <p><b>Execution Time:</b> $TIMESTAMP</p>
+
+          <h2>JMeter Metrics</h2>
+          <table border='1'>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Total Requests</td><td>$TOTAL</td></tr>
+          <tr><td>Failures</td><td>$FAILURES</td></tr>
+          <tr><td>Error %</td><td>$ERROR_PERCENT %</td></tr>
+          <tr><td>Avg</td><td>$AVG_RESPONSE ms</td></tr>
+          <tr><td>P90</td><td>$P90 ms</td></tr>
+          <tr><td>P95</td><td>$P95 ms</td></tr>
+          <tr><td>Throughput</td><td>$THROUGHPUT req/sec</td></tr>
+          <tr><td>Users</td><td>$USERS</td></tr>
+          <tr><td>Duration</td><td>$DURATION sec</td></tr>
+          </table>
+
+          <h2>Playwright Results</h2>
+          <table border='1'>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Passed</td><td>$PW_PASSED</td></tr>
+          <tr><td>Failed</td><td>$PW_FAILED</td></tr>
+          <tr><td>Duration</td><td>$PW_DURATION sec</td></tr>
+          </table>"
 
           ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | awk '{printf "%s\\n", $0}')
 
@@ -177,17 +214,17 @@ jobs:
           echo "Page ID: $PAGE_ID"
 
           echo "Uploading results.jtl..."
-          curl -v -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+          curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             -F "type=attachment" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/${PAGE_ID}/child/attachment"
 
-          echo "Uploading Playwright files..."
+          echo "Uploading Playwright reports..."
           for file in pw-result-*.json; do
             if [ -f "$file" ]; then
-              curl -v -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+              curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
                 -X POST \
                 -H "X-Atlassian-Token: no-check" \
                 -F "file=@$file" \
