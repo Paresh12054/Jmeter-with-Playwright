@@ -8,9 +8,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # -------------------------
-      # Checkout
-      # -------------------------
       - uses: actions/checkout@v4
 
       # -------------------------
@@ -44,7 +41,7 @@ jobs:
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright
+      # Run Playwright periodically
       # -------------------------
       - name: Run Playwright periodically
         run: |
@@ -121,29 +118,7 @@ jobs:
           echo $FAIL > fail.txt
 
       # -------------------------
-      # Debug
-      # -------------------------
-      - name: Debug Files
-        run: |
-          echo "===== DEBUG ====="
-          ls -R
-          echo "================="
-
-      # -------------------------
-      # Upload Artifacts
-      # -------------------------
-      - uses: actions/upload-artifact@v4
-        with:
-          name: jmeter-results
-          path: results.jtl
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: playwright-results
-          path: pw-results
-
-      # -------------------------
-      # Publish to Confluence (UX IMPROVED)
+      # Publish to Confluence
       # -------------------------
       - name: Publish to Confluence
         run: |
@@ -156,27 +131,28 @@ jobs:
 
           <h2>📊 JMeter Summary</h2>
           <table border='1' style='border-collapse: collapse;'>
-          <tr><th>Metric</th><th>Value</th></tr>
-          <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
-          <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
-          <tr><td>Error %</td><td>$(cat err.txt)</td></tr>
-          <tr><td>Avg Response</td><td>$(cat avg.txt) ms</td></tr>
-          <tr><td>P90</td><td>$(cat p90.txt)</td></tr>
-          <tr><td>P95</td><td>$(cat p95.txt)</td></tr>
-          <tr><td>Throughput</td><td>$(cat thr.txt) req/sec</td></tr>
-          <tr><td>Users</td><td>$(cat users.txt)</td></tr>
-          <tr><td>Duration</td><td>$(cat dur.txt) sec</td></tr>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
+            <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
+            <tr><td>Error %</td><td>$(cat err.txt)</td></tr>
+            <tr><td>Avg Response</td><td>$(cat avg.txt) ms</td></tr>
+            <tr><td>P90</td><td>$(cat p90.txt) ms</td></tr>
+            <tr><td>P95</td><td>$(cat p95.txt) ms</td></tr>
+            <tr><td>Throughput</td><td>$(cat thr.txt) req/sec</td></tr>
+            <tr><td>Users</td><td>$(cat users.txt)</td></tr>
+            <tr><td>Duration</td><td>$(cat dur.txt) sec</td></tr>
           </table>
 
           <h2>🎭 Playwright Summary</h2>
           <table border='1' style='border-collapse: collapse;'>
-          <tr><th>Metric</th><th>Value</th></tr>
-          <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
-          <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
-          <tr><td>Duration</td><td>$(cat pw_duration.txt) sec</td></tr>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
+            <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
+            <tr><td>Duration</td><td>$(cat pw_duration.txt) sec</td></tr>
           </table>
 
           <h2>📎 Attachments</h2>
+          <p>All raw results are attached below.</p>
           <ac:structured-macro ac:name=\"attachments\">
             <ac:parameter ac:name=\"upload\">true</ac:parameter>
           </ac:structured-macro>
@@ -197,22 +173,23 @@ jobs:
 
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
+          echo "Page ID: $PAGE_ID"
           echo "Uploading attachments..."
 
+          # Attach JMeter file
           curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
-            -F "type=attachment" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
+          # Attach Playwright results
           for f in pw-results/*.json; do
             if [ -f "$f" ]; then
               curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
                 -X POST \
                 -H "X-Atlassian-Token: no-check" \
                 -F "file=@$f" \
-                -F "type=attachment" \
                 "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
             fi
           done
