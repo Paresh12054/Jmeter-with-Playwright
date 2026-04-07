@@ -118,19 +118,22 @@ jobs:
           echo $FAIL > fail.txt
 
       # -------------------------
-      # Publish to Confluence
+      # Publish to Confluence (FIXED)
       # -------------------------
       - name: Publish to Confluence
+        shell: bash
         run: |
-          TS=$(date +"%Y-%m-%d %H:%M:%S")
+          set -e
 
-          CONTENT="
-          <h1>🚀 Performance & UI Test Report</h1>
+          TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+          PAGE_TITLE="Performance Report - $TIMESTAMP"
 
-          <p><b>Execution Time:</b> $TS</p>
+          CONTENT="<h1>🚀 Performance & UI Test Report</h1>
+
+          <p><b>Execution Time:</b> $TIMESTAMP</p>
 
           <h2>📊 JMeter Summary</h2>
-          <table border='1' style='border-collapse: collapse;'>
+          <table border='1'>
             <tr><th>Metric</th><th>Value</th></tr>
             <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
             <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
@@ -144,40 +147,48 @@ jobs:
           </table>
 
           <h2>🎭 Playwright Summary</h2>
-          <table border='1' style='border-collapse: collapse;'>
+          <table border='1'>
             <tr><th>Metric</th><th>Value</th></tr>
             <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
             <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
             <tr><td>Duration</td><td>$(cat pw_duration.txt) sec</td></tr>
-          </table>
+          </table>"
 
-          <h2>📎 Attachments</h2>
-          <p>All raw results are attached below.</p>
-          <ac:structured-macro ac:name=\"attachments\">
-            <ac:parameter ac:name=\"upload\">true</ac:parameter>
-          </ac:structured-macro>
-          "
-
-          BODY=$(printf '%s' "$CONTENT" | awk '{printf "%s\\n",$0}')
+          echo "Creating Confluence page..."
 
           RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
-          -X POST \
-          -H "Content-Type: application/json" \
-          -d "{
-            \"type\":\"page\",
-            \"title\":\"Performance Report - $TS\",
-            \"space\":{\"key\":\"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
-            \"body\":{\"storage\":{\"value\":\"$BODY\",\"representation\":\"storage\"}}
-          }" \
-          "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"type\": \"page\",
+              \"title\": \"$PAGE_TITLE\",
+              \"space\": {
+                \"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"
+              },
+              \"body\": {
+                \"storage\": {
+                  \"value\": \"$CONTENT\",
+                  \"representation\": \"storage\"
+                }
+              }
+            }" \
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
+
+          echo "Response: $RESPONSE"
 
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
-          echo "Page ID: $PAGE_ID"
+          if [ "$PAGE_ID" == "null" ] || [ -z "$PAGE_ID" ]; then
+            echo "❌ Failed to create Confluence page"
+            exit 1
+          fi
+
+          echo "✅ Page ID: $PAGE_ID"
+
           echo "Uploading attachments..."
 
           # Attach JMeter file
-          curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+          curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
@@ -186,7 +197,7 @@ jobs:
           # Attach Playwright results
           for f in pw-results/*.json; do
             if [ -f "$f" ]; then
-              curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+              curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
                 -X POST \
                 -H "X-Atlassian-Token: no-check" \
                 -F "file=@$f" \
