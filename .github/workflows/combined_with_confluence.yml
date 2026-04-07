@@ -149,7 +149,7 @@ jobs:
           echo "✅ Confluence connection successful"
 
       # -------------------------
-      # Publish to Confluence
+      # Publish to Confluence (FIXED)
       # -------------------------
       - name: Publish to Confluence
         shell: bash
@@ -165,25 +165,28 @@ jobs:
 
           <h2>📊 JMeter Summary</h2>
           <table border='1'>
-            <tr><th>Metric</th><th>Value</th></tr>
-            <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
-            <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
-            <tr><td>Error %</td><td>$(cat err.txt)</td></tr>
-            <tr><td>Avg Response</td><td>$(cat avg.txt) ms</td></tr>
-            <tr><td>P90</td><td>$(cat p90.txt) ms</td></tr>
-            <tr><td>P95</td><td>$(cat p95.txt) ms</td></tr>
-            <tr><td>Throughput</td><td>$(cat thr.txt) req/sec</td></tr>
-            <tr><td>Users</td><td>$(cat users.txt)</td></tr>
-            <tr><td>Duration</td><td>$(cat dur.txt) sec</td></tr>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
+          <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
+          <tr><td>Error %</td><td>$(cat err.txt)</td></tr>
+          <tr><td>Avg Response</td><td>$(cat avg.txt) ms</td></tr>
+          <tr><td>P90</td><td>$(cat p90.txt) ms</td></tr>
+          <tr><td>P95</td><td>$(cat p95.txt) ms</td></tr>
+          <tr><td>Throughput</td><td>$(cat thr.txt) req/sec</td></tr>
+          <tr><td>Users</td><td>$(cat users.txt)</td></tr>
+          <tr><td>Duration</td><td>$(cat dur.txt) sec</td></tr>
           </table>
 
           <h2>🎭 Playwright Summary</h2>
           <table border='1'>
-            <tr><th>Metric</th><th>Value</th></tr>
-            <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
-            <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
-            <tr><td>Duration</td><td>$(cat pw_duration.txt) sec</td></tr>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
+          <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
+          <tr><td>Duration</td><td>$(cat pw_duration.txt) sec</td></tr>
           </table>"
+
+          # ✅ FIX: escape newlines + quotes
+          ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g')
 
           echo "Creating Confluence page..."
 
@@ -198,7 +201,7 @@ jobs:
               },
               \"body\": {
                 \"storage\": {
-                  \"value\": \"$CONTENT\",
+                  \"value\": \"$ESCAPED_CONTENT\",
                   \"representation\": \"storage\"
                 }
               }
@@ -218,14 +221,14 @@ jobs:
 
           echo "Uploading attachments..."
 
-          # Attach JMeter file
+          # Attach JMeter
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach Playwright results
+          # Attach Playwright
           for f in pw-results/*.json; do
             if [ -f "$f" ]; then
               curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
