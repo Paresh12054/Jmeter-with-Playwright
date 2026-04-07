@@ -1,4 +1,4 @@
-name: JMeter + Playwright + Confluence FINAL
+name: JMeter + Playwright + Confluence
 
 on:
   workflow_dispatch:
@@ -16,7 +16,8 @@ jobs:
       # -------------------------
       # Install tools
       # -------------------------
-      - run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - uses: actions/setup-node@v4
         with:
@@ -28,7 +29,8 @@ jobs:
       # -------------------------
       # Install JMeter
       # -------------------------
-      - run: |
+      - name: Install JMeter
+        run: |
           wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.tgz
           tar -xzf apache-jmeter-5.6.3.tgz
           mv apache-jmeter-5.6.3 jmeter
@@ -36,12 +38,13 @@ jobs:
       # -------------------------
       # Start JMeter
       # -------------------------
-      - run: |
+      - name: Start JMeter
+        run: |
           nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright (FIXED 100%)
+      # Run Playwright
       # -------------------------
       - name: Run Playwright periodically
         run: |
@@ -57,10 +60,7 @@ jobs:
             TS=$(date +"%Y-%m-%d_%H-%M-%S")
             FILE="pw-results/result-$TS.json"
 
-            # Capture JSON safely
             OUTPUT=$(npx playwright test tests/Demo1.spec.ts --reporter=json || true)
-
-            # Ensure file is written even if empty
             echo "$OUTPUT" > "$FILE"
 
             if [ -s "$FILE" ]; then
@@ -69,8 +69,6 @@ jobs:
 
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
-            else
-              echo "⚠️ Empty Playwright output"
             fi
 
             sleep 180
@@ -85,12 +83,14 @@ jobs:
       # -------------------------
       # Stop JMeter
       # -------------------------
-      - run: kill $(cat jmeter.pid) || true
+      - name: Stop JMeter
+        run: kill $(cat jmeter.pid) || true
 
       # -------------------------
       # Extract JMeter Metrics
       # -------------------------
-      - run: |
+      - name: Extract Metrics
+        run: |
           TOTAL=$(($(wc -l < results.jtl) - 1))
           FAIL=$(awk -F',' 'NR>1 && $8!="true"{c++}END{print c+0}' results.jtl)
 
@@ -121,16 +121,16 @@ jobs:
           echo $FAIL > fail.txt
 
       # -------------------------
-      # Debug (IMPORTANT)
+      # Debug
       # -------------------------
-      - run: |
-          echo "===== DEBUG FILES ====="
-          ls -R pw-results || echo "pw-results missing"
-          ls -l results.jtl
-          echo "======================="
+      - name: Debug Files
+        run: |
+          echo "===== DEBUG ====="
+          ls -R
+          echo "================="
 
       # -------------------------
-      # Upload Artifacts (FIXED)
+      # Upload Artifacts
       # -------------------------
       - uses: actions/upload-artifact@v4
         with:
@@ -143,51 +143,59 @@ jobs:
           path: pw-results
 
       # -------------------------
-      # Publish to Confluence (TABLE FORMAT)
+      # Publish to Confluence (UX IMPROVED)
       # -------------------------
       - name: Publish to Confluence
         run: |
           TS=$(date +"%Y-%m-%d %H:%M:%S")
 
-          CONTENT="<h1>Performance & UI Test Report</h1>
+          CONTENT="
+          <h1>🚀 Performance & UI Test Report</h1>
+
           <p><b>Execution Time:</b> $TS</p>
 
-          <h2>JMeter Metrics</h2>
-          <table border='1'>
+          <h2>📊 JMeter Summary</h2>
+          <table border='1' style='border-collapse: collapse;'>
           <tr><th>Metric</th><th>Value</th></tr>
           <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
           <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
           <tr><td>Error %</td><td>$(cat err.txt)</td></tr>
-          <tr><td>Avg</td><td>$(cat avg.txt) ms</td></tr>
+          <tr><td>Avg Response</td><td>$(cat avg.txt) ms</td></tr>
           <tr><td>P90</td><td>$(cat p90.txt)</td></tr>
           <tr><td>P95</td><td>$(cat p95.txt)</td></tr>
-          <tr><td>Throughput</td><td>$(cat thr.txt)</td></tr>
+          <tr><td>Throughput</td><td>$(cat thr.txt) req/sec</td></tr>
           <tr><td>Users</td><td>$(cat users.txt)</td></tr>
           <tr><td>Duration</td><td>$(cat dur.txt) sec</td></tr>
           </table>
 
-          <h2>Playwright Results</h2>
-          <table border='1'>
+          <h2>🎭 Playwright Summary</h2>
+          <table border='1' style='border-collapse: collapse;'>
           <tr><th>Metric</th><th>Value</th></tr>
           <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
           <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
           <tr><td>Duration</td><td>$(cat pw_duration.txt) sec</td></tr>
-          </table>"
+          </table>
+
+          <h2>📎 Attachments</h2>
+          <ac:structured-macro ac:name=\"attachments\">
+            <ac:parameter ac:name=\"upload\">true</ac:parameter>
+          </ac:structured-macro>
+          "
 
           BODY=$(printf '%s' "$CONTENT" | awk '{printf "%s\\n",$0}')
 
-          RES=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+          RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
           -X POST \
           -H "Content-Type: application/json" \
           -d "{
             \"type\":\"page\",
-            \"title\":\"Report - $TS\",
+            \"title\":\"Performance Report - $TS\",
             \"space\":{\"key\":\"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
             \"body\":{\"storage\":{\"value\":\"$BODY\",\"representation\":\"storage\"}}
           }" \
           "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
 
-          ID=$(echo "$RES" | jq -r '.id')
+          PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
           echo "Uploading attachments..."
 
@@ -196,7 +204,7 @@ jobs:
             -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             -F "type=attachment" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$ID/child/attachment"
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
           for f in pw-results/*.json; do
             if [ -f "$f" ]; then
@@ -205,6 +213,6 @@ jobs:
                 -H "X-Atlassian-Token: no-check" \
                 -F "file=@$f" \
                 -F "type=attachment" \
-                "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$ID/child/attachment"
+                "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
             fi
           done
