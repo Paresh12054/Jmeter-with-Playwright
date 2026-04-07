@@ -15,7 +15,13 @@ jobs:
         uses: actions/checkout@v4
 
       # -------------------------
-      # Setup Node (Playwright)
+      # Install jq (IMPORTANT)
+      # -------------------------
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # -------------------------
+      # Setup Node
       # -------------------------
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -55,18 +61,17 @@ jobs:
           PASSED=0
           FAILED=0
 
+          START_TIME=$(date +%s)
+
           while [ $SECONDS -lt $END ]; do
             TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-
-            echo "Running Playwright tests at $TIMESTAMP..."
-
             RESULT_FILE="pw-result-$TIMESTAMP.json"
 
             npx playwright test tests/Demo1.spec.ts --reporter=json > $RESULT_FILE || true
 
             if [ -f "$RESULT_FILE" ]; then
-              P=$(grep -o '"status":"passed"' $RESULT_FILE | wc -l)
-              F=$(grep -o '"status":"failed"' $RESULT_FILE | wc -l)
+              P=$(jq '[.. | objects | select(.status=="passed")] | length' $RESULT_FILE)
+              F=$(jq '[.. | objects | select(.status=="failed")] | length' $RESULT_FILE)
 
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
@@ -75,8 +80,12 @@ jobs:
             sleep 180
           done
 
+          END_TIME=$(date +%s)
+          PW_DURATION=$((END_TIME - START_TIME))
+
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
+          echo $PW_DURATION > pw_duration.txt
 
       # -------------------------
       # Stop JMeter
@@ -93,48 +102,51 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o report
 
       # -------------------------
-      # Extract JMeter Metrics (CSV + P90/P95)
+      # Extract JMeter Metrics (CSV)
       # -------------------------
       - name: Extract JMeter Metrics
         run: |
-          echo "Parsing JMeter CSV results..."
-
           TOTAL=$(($(wc -l < results.jtl) - 1))
           FAILURES=$(awk -F',' 'NR>1 && $8 != "true" {count++} END {print count+0}' results.jtl)
 
-          AVG_RESPONSE=$(awk -F',' 'NR>1 {sum+=$2; count++} END {if(count>0) print int(sum/count); else print 0}' results.jtl)
+          AVG_RESPONSE=$(awk -F',' 'NR>1 {sum+=$2; count++} END {print int(sum/count)}' results.jtl)
 
-          # Percentiles
           P90=$(awk -F',' 'NR>1 {print $2}' results.jtl | sort -n | awk '{a[NR]=$1} END {print a[int(NR*0.9)]}')
           P95=$(awk -F',' 'NR>1 {print $2}' results.jtl | sort -n | awk '{a[NR]=$1} END {print a[int(NR*0.95)]}')
 
-          if [ "$TOTAL" -eq 0 ]; then TOTAL=1; fi
+          USERS=$(awk -F',' 'NR>1 {if($13>max) max=$13} END {print max+0}' results.jtl)
+
+          START=$(awk -F',' 'NR==2 {print $1}' results.jtl)
+          END=$(awk -F',' 'END {print $1}' results.jtl)
+
+          if [ -z "$START" ] || [ -z "$END" ]; then
+            DURATION=0
+          else
+            DURATION=$(( (END - START) / 1000 ))
+          fi
+
+          if [ "$DURATION" -eq 0 ]; then DURATION=1; fi
+          THROUGHPUT=$(awk "BEGIN {printf \"%.2f\", ($TOTAL/$DURATION)}")
           ERROR_PERCENT=$(awk "BEGIN {printf \"%.2f\", ($FAILURES/$TOTAL)*100}")
 
           echo $AVG_RESPONSE > avg_response.txt
           echo $ERROR_PERCENT > error_percent.txt
           echo $P90 > p90.txt
           echo $P95 > p95.txt
-
-          echo "Total: $TOTAL"
-          echo "Failures: $FAILURES"
-          echo "Avg: $AVG_RESPONSE"
-          echo "P90: $P90"
-          echo "P95: $P95"
-          echo "Error %: $ERROR_PERCENT"
+          echo $USERS > users.txt
+          echo $DURATION > duration.txt
+          echo $THROUGHPUT > throughput.txt
+          echo $TOTAL > total.txt
+          echo $FAILURES > failures.txt
 
       # -------------------------
-      # Debug Step
+      # Debug Files
       # -------------------------
-      - name: Debug Metrics
+      - name: Debug Files
         run: |
-          echo "===== Metrics ====="
-          cat avg_response.txt
-          cat error_percent.txt
-          cat p90.txt
-          cat p95.txt
-          cat pw_passed.txt
-          cat pw_failed.txt
+          echo "===== FILE CHECK ====="
+          ls -l results.jtl
+          ls -l pw-result-*.json || echo "No Playwright JSON files"
 
       # -------------------------
       # Upload Artifacts
@@ -169,34 +181,49 @@ jobs:
           ERROR_PERCENT=$(cat error_percent.txt)
           P90=$(cat p90.txt)
           P95=$(cat p95.txt)
+          USERS=$(cat users.txt)
+          DURATION=$(cat duration.txt)
+          THROUGHPUT=$(cat throughput.txt)
+          TOTAL=$(cat total.txt)
+          FAILURES=$(cat failures.txt)
+
           PW_PASSED=$(cat pw_passed.txt)
           PW_FAILED=$(cat pw_failed.txt)
+          PW_DURATION=$(cat pw_duration.txt)
 
-          CONTENT="<h1>Automated Test Report</h1>
-          <p><b>Timestamp:</b> $TIMESTAMP</p>
+          CONTENT="<h1>Performance & UI Test Report</h1>
+          <p><b>Execution Time:</b> $TIMESTAMP</p>
 
           <h2>JMeter Metrics</h2>
-          <ul>
-            <li>Average Response Time: $AVG_RESPONSE ms</li>
-            <li>P90 Response Time: $P90 ms</li>
-            <li>P95 Response Time: $P95 ms</li>
-            <li>Error Percentage: $ERROR_PERCENT %</li>
-          </ul>
+          <table border='1'>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Total Requests</td><td>$TOTAL</td></tr>
+            <tr><td>Failures</td><td>$FAILURES</td></tr>
+            <tr><td>Error %</td><td>$ERROR_PERCENT %</td></tr>
+            <tr><td>Avg</td><td>$AVG_RESPONSE ms</td></tr>
+            <tr><td>P90</td><td>$P90 ms</td></tr>
+            <tr><td>P95</td><td>$P95 ms</td></tr>
+            <tr><td>Throughput</td><td>$THROUGHPUT req/sec</td></tr>
+            <tr><td>Users</td><td>$USERS</td></tr>
+            <tr><td>Duration</td><td>$DURATION sec</td></tr>
+          </table>
 
           <h2>Playwright Results</h2>
-          <ul>
-            <li>Passed: $PW_PASSED</li>
-            <li>Failed: $PW_FAILED</li>
-          </ul>"
+          <table border='1'>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Passed</td><td>$PW_PASSED</td></tr>
+            <tr><td>Failed</td><td>$PW_FAILED</td></tr>
+            <tr><td>Duration</td><td>$PW_DURATION sec</td></tr>
+          </table>"
 
           ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | awk '{printf "%s\\n", $0}')
 
-          curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+          RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "Content-Type: application/json" \
             -d "{
               \"type\": \"page\",
-              \"title\": \"Test Report - $TIMESTAMP\",
+              \"title\": \"Performance Report - $TIMESTAMP\",
               \"space\": {
                 \"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"
               },
@@ -207,4 +234,33 @@ jobs:
                 }
               }
             }" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/"
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
+
+          PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+          echo "Page ID: $PAGE_ID"
+
+          if [ -z "$PAGE_ID" ] || [ "$PAGE_ID" == "null" ]; then
+            echo "❌ Failed to get page ID"
+            echo "$RESPONSE"
+            exit 1
+          fi
+
+          echo "Uploading results.jtl..."
+          curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            -X POST \
+            -H "X-Atlassian-Token: no-check" \
+            -F "file=@results.jtl" \
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+
+          echo "Uploading Playwright reports..."
+          for file in pw-result-*.json; do
+            if [ -f "$file" ]; then
+              echo "Uploading $file"
+              curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+                -X POST \
+                -H "X-Atlassian-Token: no-check" \
+                -F "file=@$file" \
+                "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+            fi
+          done
