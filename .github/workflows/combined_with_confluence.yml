@@ -8,6 +8,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # -------------------------
+      # Checkout
+      # -------------------------
       - uses: actions/checkout@v4
 
       # -------------------------
@@ -118,7 +121,35 @@ jobs:
           echo $FAIL > fail.txt
 
       # -------------------------
-      # Publish to Confluence (FIXED)
+      # Confluence Connection Debug Test
+      # -------------------------
+      - name: Confluence Connection Debug Test
+        shell: bash
+        run: |
+          set -e
+
+          echo "🔍 Testing Confluence connection..."
+
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+            -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            -X GET \
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/space?limit=1")
+
+          BODY=$(echo "$RESPONSE" | sed -n '1p')
+          STATUS=$(echo "$RESPONSE" | sed -n '2p' | cut -d':' -f2)
+
+          echo "HTTP Status: $STATUS"
+          echo "Response Body: $BODY"
+
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ Confluence connection failed"
+            exit 1
+          fi
+
+          echo "✅ Confluence connection successful"
+
+      # -------------------------
+      # Publish to Confluence
       # -------------------------
       - name: Publish to Confluence
         shell: bash
