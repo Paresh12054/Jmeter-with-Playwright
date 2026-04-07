@@ -41,7 +41,7 @@ jobs:
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright (FIXED PROPERLY)
+      # Run Playwright (FIXED 100%)
       # -------------------------
       - name: Run Playwright periodically
         run: |
@@ -55,20 +55,22 @@ jobs:
 
           while [ $SECONDS -lt $END ]; do
             TS=$(date +"%Y-%m-%d_%H-%M-%S")
-            OUT="pw-results/result-$TS.json"
+            FILE="pw-results/result-$TS.json"
 
-            npx playwright test tests/Demo1.spec.ts \
-              --reporter=json \
-              --reporter-options outputFile=$OUT || true
+            # Capture JSON safely
+            OUTPUT=$(npx playwright test tests/Demo1.spec.ts --reporter=json || true)
 
-            if [ -f "$OUT" ]; then
-              P=$(jq '[.. | objects | select(.status=="passed")] | length' "$OUT")
-              F=$(jq '[.. | objects | select(.status=="failed")] | length' "$OUT")
+            # Ensure file is written even if empty
+            echo "$OUTPUT" > "$FILE"
+
+            if [ -s "$FILE" ]; then
+              P=$(jq '[.. | objects | select(.status=="passed")] | length' "$FILE")
+              F=$(jq '[.. | objects | select(.status=="failed")] | length' "$FILE")
 
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
             else
-              echo "⚠️ File not created: $OUT"
+              echo "⚠️ Empty Playwright output"
             fi
 
             sleep 180
@@ -119,11 +121,12 @@ jobs:
           echo $FAIL > fail.txt
 
       # -------------------------
-      # Debug
+      # Debug (IMPORTANT)
       # -------------------------
       - run: |
           echo "===== DEBUG FILES ====="
-          ls -R
+          ls -R pw-results || echo "pw-results missing"
+          ls -l results.jtl
           echo "======================="
 
       # -------------------------
@@ -140,22 +143,36 @@ jobs:
           path: pw-results
 
       # -------------------------
-      # Publish to Confluence (FULL CONTENT)
+      # Publish to Confluence (TABLE FORMAT)
       # -------------------------
-      - name: Publish
+      - name: Publish to Confluence
         run: |
           TS=$(date +"%Y-%m-%d %H:%M:%S")
 
-          CONTENT="<h1>Performance Report</h1>
-          <p><b>Time:</b> $TS</p>
-          <h2>JMeter</h2>
-          <p>Avg: $(cat avg.txt) ms | P90: $(cat p90.txt) | P95: $(cat p95.txt)</p>
-          <p>Error %: $(cat err.txt) | Throughput: $(cat thr.txt)</p>
-          <p>Users: $(cat users.txt) | Duration: $(cat dur.txt)</p>
+          CONTENT="<h1>Performance & UI Test Report</h1>
+          <p><b>Execution Time:</b> $TS</p>
 
-          <h2>Playwright</h2>
-          <p>Passed: $(cat pw_passed.txt) | Failed: $(cat pw_failed.txt)</p>
-          <p>Duration: $(cat pw_duration.txt)</p>"
+          <h2>JMeter Metrics</h2>
+          <table border='1'>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
+          <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
+          <tr><td>Error %</td><td>$(cat err.txt)</td></tr>
+          <tr><td>Avg</td><td>$(cat avg.txt) ms</td></tr>
+          <tr><td>P90</td><td>$(cat p90.txt)</td></tr>
+          <tr><td>P95</td><td>$(cat p95.txt)</td></tr>
+          <tr><td>Throughput</td><td>$(cat thr.txt)</td></tr>
+          <tr><td>Users</td><td>$(cat users.txt)</td></tr>
+          <tr><td>Duration</td><td>$(cat dur.txt) sec</td></tr>
+          </table>
+
+          <h2>Playwright Results</h2>
+          <table border='1'>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
+          <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
+          <tr><td>Duration</td><td>$(cat pw_duration.txt) sec</td></tr>
+          </table>"
 
           BODY=$(printf '%s' "$CONTENT" | awk '{printf "%s\\n",$0}')
 
