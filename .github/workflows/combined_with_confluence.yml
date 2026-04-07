@@ -1,4 +1,4 @@
-name: JMeter + Playwright + Confluence Final
+name: JMeter + Playwright + Confluence FINAL
 
 on:
   workflow_dispatch:
@@ -41,7 +41,7 @@ jobs:
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright (FIXED)
+      # Run Playwright (FIXED PROPERLY)
       # -------------------------
       - name: Run Playwright periodically
         run: |
@@ -59,17 +59,16 @@ jobs:
 
             npx playwright test tests/Demo1.spec.ts \
               --reporter=json \
-              --output=pw-results \
-              > "$OUT" || true
+              --reporter-options outputFile=$OUT || true
 
-            if [ -s "$OUT" ]; then
+            if [ -f "$OUT" ]; then
               P=$(jq '[.. | objects | select(.status=="passed")] | length' "$OUT")
               F=$(jq '[.. | objects | select(.status=="failed")] | length' "$OUT")
 
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
             else
-              echo "⚠️ Empty report: $OUT"
+              echo "⚠️ File not created: $OUT"
             fi
 
             sleep 180
@@ -123,8 +122,9 @@ jobs:
       # Debug
       # -------------------------
       - run: |
-          echo "===== FILES ====="
+          echo "===== DEBUG FILES ====="
           ls -R
+          echo "======================="
 
       # -------------------------
       # Upload Artifacts (FIXED)
@@ -140,13 +140,22 @@ jobs:
           path: pw-results
 
       # -------------------------
-      # Publish to Confluence
+      # Publish to Confluence (FULL CONTENT)
       # -------------------------
       - name: Publish
         run: |
           TS=$(date +"%Y-%m-%d %H:%M:%S")
 
-          CONTENT="<h1>Report</h1><p>$TS</p>"
+          CONTENT="<h1>Performance Report</h1>
+          <p><b>Time:</b> $TS</p>
+          <h2>JMeter</h2>
+          <p>Avg: $(cat avg.txt) ms | P90: $(cat p90.txt) | P95: $(cat p95.txt)</p>
+          <p>Error %: $(cat err.txt) | Throughput: $(cat thr.txt)</p>
+          <p>Users: $(cat users.txt) | Duration: $(cat dur.txt)</p>
+
+          <h2>Playwright</h2>
+          <p>Passed: $(cat pw_passed.txt) | Failed: $(cat pw_failed.txt)</p>
+          <p>Duration: $(cat pw_duration.txt)</p>"
 
           BODY=$(printf '%s' "$CONTENT" | awk '{printf "%s\\n",$0}')
 
@@ -163,9 +172,8 @@ jobs:
 
           ID=$(echo "$RES" | jq -r '.id')
 
-          echo "Page ID: $ID"
+          echo "Uploading attachments..."
 
-          echo "Uploading JTL..."
           curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "X-Atlassian-Token: no-check" \
@@ -173,7 +181,6 @@ jobs:
             -F "type=attachment" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$ID/child/attachment"
 
-          echo "Uploading PW folder..."
           for f in pw-results/*.json; do
             if [ -f "$f" ]; then
               curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
