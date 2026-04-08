@@ -91,24 +91,27 @@ jobs:
           echo $JM_END > jm_end.txt
 
       # -------------------------
-      # Extract JMeter Metrics
+      # Generate JMeter HTML Report
+      # -------------------------
+      - name: Generate JMeter HTML Report
+        run: |
+          ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
+
+      # -------------------------
+      # Extract Metrics + Aggregate
       # -------------------------
       - name: Extract Metrics + Aggregate
         run: |
           TOTAL=$(($(wc -l < results.jtl) - 1))
           FAIL=$(awk -F',' 'NR>1 && $8!="true"{c++}END{print c+0}' results.jtl)
-
           AVG=$(awk -F',' 'NR>1{sum+=$2;c++}END{print int(sum/c)}' results.jtl)
 
           echo $TOTAL > total.txt
           echo $FAIL > fail.txt
           echo $AVG > avg.txt
 
-          # -------------------------
-          # Aggregate Table
-          # -------------------------
           echo "<table border='1'>" > agg.html
-          echo "<tr><th>Label</th><th>Total</th><th>Avg(ms)</th><th>Error%</th></tr>" >> agg.html
+          echo "<tr><th>Label</th><th>Total</th><th>Avg</th><th>P90</th><th>P95</th><th>Error%</th></tr>" >> agg.html
 
           awk -F',' '
           NR>1 {
@@ -116,34 +119,23 @@ jobs:
             total[label]++
             sum[label]+=$2
             if($8!="true") fail[label]++
+            times[label]=times[label] " " $2
           }
           END {
             for (l in total) {
+              n=split(times[l], arr, " ")
+              asort(arr)
+
+              p90=arr[int(n*0.9)]
+              p95=arr[int(n*0.95)]
               avg=int(sum[l]/total[l])
               err=(fail[l]/total[l])*100
-              printf "<tr><td>%s</td><td>%d</td><td>%d</td><td>%.2f</td></tr>\n", l, total[l], avg, err
+
+              printf "<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%.2f</td></tr>\n", l, total[l], avg, p90, p95, err
             }
           }' results.jtl >> agg.html
 
           echo "</table>" >> agg.html
-
-      # -------------------------
-      # Confluence Connection Test
-      # -------------------------
-      - name: Confluence Connection Test
-        run: |
-          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-            -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/space?limit=1")
-
-          STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d':' -f2)
-
-          if [ "$STATUS" != "200" ]; then
-            echo "❌ Confluence connection failed"
-            exit 1
-          fi
-
-          echo "✅ Confluence connected"
 
       # -------------------------
       # Publish to Confluence
@@ -165,14 +157,11 @@ jobs:
           <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
           </table>
 
-          <h2>📊 JMeter Summary</h2>
-          <table border='1'>
-          <tr><th>Total</th><th>Failures</th><th>Avg(ms)</th></tr>
-          <tr><td>$(cat total.txt)</td><td>$(cat fail.txt)</td><td>$(cat avg.txt)</td></tr>
-          </table>
-
           <h2>📈 JMeter Aggregate (Per API)</h2>
           $AGG
+
+          <h2>📊 JMeter HTML Report</h2>
+          <p>Download full HTML dashboard from attachments.</p>
 
           <h2>🎭 Playwright Summary</h2>
           <table border='1'>
@@ -200,12 +189,21 @@ jobs:
 
           echo "Page ID: $PAGE_ID"
 
-          # Attach files
+          # Attach JMeter results
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
+          # Attach HTML report (zip it first)
+          zip -r jmeter-report.zip jmeter-report
+
+          curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@jmeter-report.zip" \
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+
+          # Attach Playwright
           for f in pw-results/*.json; do
             curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
               -X POST -H "X-Atlassian-Token: no-check" \
