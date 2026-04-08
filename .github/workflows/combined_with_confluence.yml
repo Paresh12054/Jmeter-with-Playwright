@@ -111,14 +111,22 @@ jobs:
 
           awk -F',' '
           NR>1 {
+
             label=$3
-            success=tolower($8)
+            success=$8
+
+            # clean values (CRITICAL FIX)
+            gsub(/\r/,"",success)
+            gsub(/^[ \t"]+|[ \t"]+$/, "", success)
 
             if (label ~ /^PT[0-9]+_/) {
+
               total[label]++
               sum[label]+=$2
 
-              if(success!="true") fail[label]++
+              if (success != "true") {
+                fail[label]++
+              }
 
               times[label]=times[label] " " $2
             }
@@ -151,7 +159,11 @@ jobs:
               p95 = clean[p95_index]
 
               avg = int(sum[l]/total[l])
-              err = (fail[l]/total[l])*100
+
+              err = 0
+              if (total[l] > 0) {
+                err = (fail[l]/total[l])*100
+              }
 
               avg_sla = (avg <= 1000) ? "PASS" : "FAIL"
               p90_sla = (p90 <= 3000) ? "PASS" : "FAIL"
@@ -161,7 +173,18 @@ jobs:
               p90_color = (p90_sla=="PASS") ? "#c6efce" : "#ffc7ce"
               overall_color = (overall=="PASS") ? "#c6efce" : "#ffc7ce"
 
-              printf "<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%.2f</td><td style=\"background-color:%s\"><b>%s</b></td><td style=\"background-color:%s\"><b>%s</b></td><td style=\"background-color:%s\"><b>%s</b></td></tr>\n", l,total[l],avg,p90,p95,err,avg_color,avg_sla,p90_color,p90_sla,overall_color,overall
+              printf "<tr>\
+<td>%s</td>\
+<td>%d</td>\
+<td>%d</td>\
+<td>%d</td>\
+<td>%d</td>\
+<td>%.2f</td>\
+<td style=\"background-color:%s\"><b>%s</b></td>\
+<td style=\"background-color:%s\"><b>%s</b></td>\
+<td style=\"background-color:%s\"><b>%s</b></td>\
+</tr>\n", \
+l,total[l],avg,p90,p95,err,avg_color,avg_sla,p90_color,p90_sla,overall_color,overall
             }
           }' results.jtl >> agg.html
 
@@ -190,7 +213,7 @@ jobs:
           $AGG
 
           <h2>📊 JMeter HTML Report</h2>
-          <p>Download full report from attachments (jmeter-report.zip)</p>
+          <p>Attached separately (zip file)</p>
 
           <h2>🎭 Playwright Summary</h2>
           <table border='1'>
@@ -199,7 +222,7 @@ jobs:
           </table>
 
           <h2>📝 Observations</h2>
-          <p><i>👉 Add your observations manually here.</i></p>
+          <p><i>👉 Add your observations, bottlenecks, and recommendations here manually.</i></p>
 
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
@@ -221,11 +244,13 @@ jobs:
 
           echo "Page ID: $PAGE_ID"
 
+          # Attach JTL
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
+          # Attach HTML report
           zip -r jmeter-report.zip jmeter-report
 
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
@@ -233,6 +258,7 @@ jobs:
             -F "file=@jmeter-report.zip" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
+          # Attach Playwright
           for f in pw-results/*.json; do
             curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
               -X POST -H "X-Atlassian-Token: no-check" \
