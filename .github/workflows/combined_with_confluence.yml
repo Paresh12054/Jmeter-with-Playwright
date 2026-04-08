@@ -91,13 +91,13 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
       # -------------------------
-      # Aggregate + SLA
+      # Aggregate Table
       # -------------------------
       - name: Generate Aggregate Table
         run: |
-          echo "<table border='1' style='border-collapse: collapse;'>" > agg.html
+          echo "<table border='1' style='border-collapse: collapse; width:100%; font-family: Arial;'>" > agg.html
 
-          echo "<tr>
+          echo "<tr style='background-color:#f2f2f2;'>
           <th>Transaction</th>
           <th>Total</th>
           <th>Avg (ms)</th>
@@ -220,16 +220,14 @@ jobs:
           </table>
 
           <h2>📝 Observations</h2>
-          <p><i>👉 Add your observations, bottlenecks, and recommendations here manually.</i></p>
+          <p><i>Add observations, bottlenecks, and recommendations here.</i></p>
 
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          # Escape HTML for Confluence
-          ESCAPED_HTML=$(printf '%s' "$CONTENT" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')
-
-          # IMPORTANT: Remove newline characters for valid JSON
-          ESCAPED_JSON=$(printf '%s' "$ESCAPED_HTML" | tr '\n' ' ')
+          # IMPORTANT: Do NOT escape HTML tags (Confluence needs raw XHTML)
+          # Only remove newlines for JSON safety
+          ESCAPED_JSON=$(printf '%s' "$CONTENT" | tr '\n' ' ')
 
           RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
