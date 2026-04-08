@@ -161,16 +161,16 @@ jobs:
               }
 
               printf "<tr style='background-color:%s'>
-<td>%s</td>
-<td>%d</td>
-<td>%d</td>
-<td>%d</td>
-<td>%d</td>
-<td>%.2f</td>
-<td>%s</td>
-<td>%s</td>
-<td><b>%s</b></td>
-</tr>\n",
+                <td>%s</td>
+                <td>%d</td>
+                <td>%d</td>
+                <td>%d</td>
+                <td>%d</td>
+                <td>%.2f</td>
+                <td>%s</td>
+                <td>%s</td>
+                <td><b>%s</b></td>
+                </tr>\n",
               color,l,total[l],avg,p90,p95,err,avg_sla,p90_sla,overall
             }
           }' results.jtl >> agg.html
