@@ -1,4 +1,4 @@
-name: JMeter + Playwright + Confluence + Attachment
+name: JMeter + Playwright + Confluence+SLA
 
 on:
   workflow_dispatch:
@@ -37,6 +37,9 @@ jobs:
       # -------------------------
       - name: Start JMeter
         run: |
+          JM_START=$(date +"%Y-%m-%d %H:%M:%S")
+          echo $JM_START > jm_start.txt
+
           nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
           echo $! > jmeter.pid
 
@@ -47,10 +50,12 @@ jobs:
         run: |
           mkdir -p pw-results
 
+          PW_START=$(date +"%Y-%m-%d %H:%M:%S")
+          echo $PW_START > pw_start.txt
+
           END=$((SECONDS+600))
           PASSED=0
           FAILED=0
-          START_TIME=$(date +%s)
 
           while [ $SECONDS -lt $END ]; do
             TS=$(date +"%Y-%m-%d_%H-%M-%S")
@@ -62,6 +67,7 @@ jobs:
             if [ -s "$FILE" ]; then
               P=$(jq '[.. | objects | select(.status=="passed")] | length' "$FILE")
               F=$(jq '[.. | objects | select(.status=="failed")] | length' "$FILE")
+
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
             fi
@@ -69,68 +75,107 @@ jobs:
             sleep 180
           done
 
-          END_TIME=$(date +%s)
+          PW_END=$(date +"%Y-%m-%d %H:%M:%S")
+          echo $PW_END > pw_end.txt
 
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
-          echo $((END_TIME - START_TIME)) > pw_duration.txt
 
       # -------------------------
       # Stop JMeter
       # -------------------------
       - name: Stop JMeter
-        run: kill $(cat jmeter.pid) || true
-
-      # -------------------------
-      # Extract Metrics
-      # -------------------------
-      - name: Extract Metrics
         run: |
-          TOTAL=$(($(wc -l < results.jtl) - 1))
-          FAIL=$(awk -F',' 'NR>1 && $8!="true"{c++}END{print c+0}' results.jtl)
-          AVG=$(awk -F',' 'NR>1{sum+=$2;c++}END{print int(sum/c)}' results.jtl)
-
-          P90=$(awk -F',' 'NR>1{print $2}' results.jtl | sort -n | awk '{a[NR]=$1}END{print a[int(NR*0.9)]}')
-          P95=$(awk -F',' 'NR>1{print $2}' results.jtl | sort -n | awk '{a[NR]=$1}END{print a[int(NR*0.95)]}')
-
-          USERS=$(awk -F',' 'NR>1{if($13>m)m=$13}END{print m+0}' results.jtl)
-
-          START=$(awk -F',' 'NR==2{print $1}' results.jtl)
-          END=$(awk -F',' 'END{print $1}' results.jtl)
-
-          DUR=$(( (END-START)/1000 ))
-          [ "$DUR" -eq 0 ] && DUR=1
-
-          THR=$(awk "BEGIN {printf \"%.2f\", ($TOTAL/$DUR)}")
-          ERR=$(awk "BEGIN {printf \"%.2f\", ($FAIL/$TOTAL)*100}")
-
-          echo $AVG > avg.txt
-          echo $ERR > err.txt
-          echo $P90 > p90.txt
-          echo $P95 > p95.txt
-          echo $USERS > users.txt
-          echo $DUR > dur.txt
-          echo $THR > thr.txt
-          echo $TOTAL > total.txt
-          echo $FAIL > fail.txt
+          kill $(cat jmeter.pid) || true
+          JM_END=$(date +"%Y-%m-%d %H:%M:%S")
+          echo $JM_END > jm_end.txt
 
       # -------------------------
-      # Confluence Connection Test
+      # Generate JMeter HTML Report
       # -------------------------
-      - name: Confluence Connection Debug Test
+      - name: Generate JMeter HTML Report
         run: |
-          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-            -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/space?limit=1")
+          ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
-          STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d':' -f2)
+      # -------------------------
+      # Extract Metrics + SLA + Aggregate
+      # -------------------------
+      - name: Extract Metrics + Aggregate
+        run: |
+          echo "<table border='1' style='border-collapse: collapse;'>" > agg.html
 
-          if [ "$STATUS" != "200" ]; then
-            echo "❌ Confluence connection failed"
-            exit 1
-          fi
+          echo "<tr>
+          <th>Transaction</th>
+          <th>Total</th>
+          <th>Avg (ms)</th>
+          <th>P90 (ms)</th>
+          <th>P95 (ms)</th>
+          <th>Error %</th>
+          <th>Avg SLA (≤1000ms)</th>
+          <th>P90 SLA (≤3000ms)</th>
+          <th>Overall SLA</th>
+          </tr>" >> agg.html
 
-          echo "✅ Confluence connection successful"
+          awk -F',' '
+          NR>1 {
+            label=$3
+            success=$8
+
+            if (label ~ /^PT[0-9]+_/) {
+
+              total[label]++
+              sum[label]+=$2
+
+              if(success!="true") fail[label]++
+
+              times[label]=times[label] " " $2
+            }
+          }
+          END {
+            for (l in total) {
+              n=split(times[l], arr, " ")
+
+              # sort array
+              for(i=1;i<=n;i++){
+                for(j=i+1;j<=n;j++){
+                  if(arr[i]>arr[j]){
+                    tmp=arr[i]; arr[i]=arr[j]; arr[j]=tmp
+                  }
+                }
+              }
+
+              p90=arr[int(n*0.9)]
+              p95=arr[int(n*0.95)]
+              avg=int(sum[l]/total[l])
+              err=(fail[l]/total[l])*100
+
+              avg_sla = (avg <= 1000) ? "PASS" : "FAIL"
+              p90_sla = (p90 <= 3000) ? "PASS" : "FAIL"
+
+              if (avg_sla=="PASS" && p90_sla=="PASS") {
+                overall="PASS"
+                color="#c6efce"   # green
+              } else {
+                overall="FAIL"
+                color="#ffc7ce"   # red
+              }
+
+              printf "<tr style='background-color:%s'>
+<td>%s</td>
+<td>%d</td>
+<td>%d</td>
+<td>%d</td>
+<td>%d</td>
+<td>%.2f</td>
+<td>%s</td>
+<td>%s</td>
+<td><b>%s</b></td>
+</tr>\n",
+              color,l,total[l],avg,p90,p95,err,avg_sla,p90_sla,overall
+            }
+          }' results.jtl >> agg.html
+
+          echo "</table>" >> agg.html
 
       # -------------------------
       # Publish to Confluence
@@ -141,27 +186,31 @@ jobs:
 
           TS=$(date +"%Y-%m-%d %H:%M:%S")
 
-          CONTENT="<h1>🚀 Performance & UI Test Report</h1>
-          <p><b>Execution Time:</b> $TS</p>
+          AGG=$(cat agg.html)
 
-          <h2>📊 JMeter Summary</h2>
+          CONTENT="<h1>🚀 Performance & UI Test Report</h1>
+
+          <h2>⏱ Execution Timeline</h2>
           <table border='1'>
-          <tr><th>Metric</th><th>Value</th></tr>
-          <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
-          <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
-          <tr><td>Error %</td><td>$(cat err.txt)</td></tr>
-          <tr><td>Avg</td><td>$(cat avg.txt)</td></tr>
-          <tr><td>P90</td><td>$(cat p90.txt)</td></tr>
-          <tr><td>P95</td><td>$(cat p95.txt)</td></tr>
-          <tr><td>Throughput</td><td>$(cat thr.txt)</td></tr>
+          <tr><th>Type</th><th>Start</th><th>End</th></tr>
+          <tr><td>JMeter</td><td>$(cat jm_start.txt)</td><td>$(cat jm_end.txt)</td></tr>
+          <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
           </table>
+
+          <h2>📈 Transaction-Level Aggregate (SLA Enabled)</h2>
+          $AGG
+
+          <h2>📊 JMeter HTML Report</h2>
+          <p>Download full report from attachments (jmeter-report.zip)</p>
 
           <h2>🎭 Playwright Summary</h2>
           <table border='1'>
-          <tr><th>Metric</th><th>Value</th></tr>
-          <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
-          <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
+          <tr><th>Passed</th><th>Failed</th></tr>
+          <tr><td>$(cat pw_passed.txt)</td><td>$(cat pw_failed.txt)</td></tr>
           </table>
+
+          <h2>📝 Observations</h2>
+          <p><i>👉 Add your observations, bottlenecks, performance issues, and recommendations here manually.</i></p>
 
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
@@ -183,12 +232,21 @@ jobs:
 
           echo "Page ID: $PAGE_ID"
 
-          # Upload attachments
+          # Attach JMeter raw
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
+          # Attach HTML report
+          zip -r jmeter-report.zip jmeter-report
+
+          curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@jmeter-report.zip" \
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+
+          # Attach Playwright results
           for f in pw-results/*.json; do
             curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
               -X POST -H "X-Atlassian-Token: no-check" \
