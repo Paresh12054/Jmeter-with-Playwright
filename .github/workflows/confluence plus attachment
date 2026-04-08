@@ -1,0 +1,197 @@
+name: JMeter + Playwright + Confluence + Attachment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  performance-and-ui:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # -------------------------
+      # Install tools
+      # -------------------------
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - run: npm install
+      - run: npx playwright install --with-deps
+
+      # -------------------------
+      # Install JMeter
+      # -------------------------
+      - name: Install JMeter
+        run: |
+          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.tgz
+          tar -xzf apache-jmeter-5.6.3.tgz
+          mv apache-jmeter-5.6.3 jmeter
+
+      # -------------------------
+      # Start JMeter
+      # -------------------------
+      - name: Start JMeter
+        run: |
+          nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
+          echo $! > jmeter.pid
+
+      # -------------------------
+      # Run Playwright
+      # -------------------------
+      - name: Run Playwright periodically
+        run: |
+          mkdir -p pw-results
+
+          END=$((SECONDS+600))
+          PASSED=0
+          FAILED=0
+          START_TIME=$(date +%s)
+
+          while [ $SECONDS -lt $END ]; do
+            TS=$(date +"%Y-%m-%d_%H-%M-%S")
+            FILE="pw-results/result-$TS.json"
+
+            OUTPUT=$(npx playwright test tests/Demo1.spec.ts --reporter=json || true)
+            echo "$OUTPUT" > "$FILE"
+
+            if [ -s "$FILE" ]; then
+              P=$(jq '[.. | objects | select(.status=="passed")] | length' "$FILE")
+              F=$(jq '[.. | objects | select(.status=="failed")] | length' "$FILE")
+              PASSED=$((PASSED + P))
+              FAILED=$((FAILED + F))
+            fi
+
+            sleep 180
+          done
+
+          END_TIME=$(date +%s)
+
+          echo $PASSED > pw_passed.txt
+          echo $FAILED > pw_failed.txt
+          echo $((END_TIME - START_TIME)) > pw_duration.txt
+
+      # -------------------------
+      # Stop JMeter
+      # -------------------------
+      - name: Stop JMeter
+        run: kill $(cat jmeter.pid) || true
+
+      # -------------------------
+      # Extract Metrics
+      # -------------------------
+      - name: Extract Metrics
+        run: |
+          TOTAL=$(($(wc -l < results.jtl) - 1))
+          FAIL=$(awk -F',' 'NR>1 && $8!="true"{c++}END{print c+0}' results.jtl)
+          AVG=$(awk -F',' 'NR>1{sum+=$2;c++}END{print int(sum/c)}' results.jtl)
+
+          P90=$(awk -F',' 'NR>1{print $2}' results.jtl | sort -n | awk '{a[NR]=$1}END{print a[int(NR*0.9)]}')
+          P95=$(awk -F',' 'NR>1{print $2}' results.jtl | sort -n | awk '{a[NR]=$1}END{print a[int(NR*0.95)]}')
+
+          USERS=$(awk -F',' 'NR>1{if($13>m)m=$13}END{print m+0}' results.jtl)
+
+          START=$(awk -F',' 'NR==2{print $1}' results.jtl)
+          END=$(awk -F',' 'END{print $1}' results.jtl)
+
+          DUR=$(( (END-START)/1000 ))
+          [ "$DUR" -eq 0 ] && DUR=1
+
+          THR=$(awk "BEGIN {printf \"%.2f\", ($TOTAL/$DUR)}")
+          ERR=$(awk "BEGIN {printf \"%.2f\", ($FAIL/$TOTAL)*100}")
+
+          echo $AVG > avg.txt
+          echo $ERR > err.txt
+          echo $P90 > p90.txt
+          echo $P95 > p95.txt
+          echo $USERS > users.txt
+          echo $DUR > dur.txt
+          echo $THR > thr.txt
+          echo $TOTAL > total.txt
+          echo $FAIL > fail.txt
+
+      # -------------------------
+      # Confluence Connection Test
+      # -------------------------
+      - name: Confluence Connection Debug Test
+        run: |
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+            -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/space?limit=1")
+
+          STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d':' -f2)
+
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ Confluence connection failed"
+            exit 1
+          fi
+
+          echo "✅ Confluence connection successful"
+
+      # -------------------------
+      # Publish to Confluence
+      # -------------------------
+      - name: Publish to Confluence
+        run: |
+          set -e
+
+          TS=$(date +"%Y-%m-%d %H:%M:%S")
+
+          CONTENT="<h1>🚀 Performance & UI Test Report</h1>
+          <p><b>Execution Time:</b> $TS</p>
+
+          <h2>📊 JMeter Summary</h2>
+          <table border='1'>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
+          <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
+          <tr><td>Error %</td><td>$(cat err.txt)</td></tr>
+          <tr><td>Avg</td><td>$(cat avg.txt)</td></tr>
+          <tr><td>P90</td><td>$(cat p90.txt)</td></tr>
+          <tr><td>P95</td><td>$(cat p95.txt)</td></tr>
+          <tr><td>Throughput</td><td>$(cat thr.txt)</td></tr>
+          </table>
+
+          <h2>🎭 Playwright Summary</h2>
+          <table border='1'>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
+          <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
+          </table>
+
+          <h2>📎 Attachments</h2>
+          <ac:structured-macro ac:name=\"attachments\"/>"
+
+          ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g')
+
+          RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"type\": \"page\",
+              \"title\": \"Performance Report - $TS\",
+              \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
+              \"body\": {\"storage\": {\"value\": \"$ESCAPED_CONTENT\",\"representation\": \"storage\"}}
+            }" \
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
+
+          PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+          echo "Page ID: $PAGE_ID"
+
+          # Upload attachments
+          curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@results.jtl" \
+            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+
+          for f in pw-results/*.json; do
+            curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+              -X POST -H "X-Atlassian-Token: no-check" \
+              -F "file=@$f" \
+              "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+          done
