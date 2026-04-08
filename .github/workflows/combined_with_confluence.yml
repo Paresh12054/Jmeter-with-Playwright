@@ -42,7 +42,7 @@ jobs:
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright
+      # Run Playwright periodically
       # -------------------------
       - name: Run Playwright periodically
         run: |
@@ -225,8 +225,11 @@ jobs:
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          # Proper XHTML escaping
-          ESCAPED=$(printf '%s' "$CONTENT" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')
+          # Escape HTML for Confluence
+          ESCAPED_HTML=$(printf '%s' "$CONTENT" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')
+
+          # IMPORTANT: Remove newline characters for valid JSON
+          ESCAPED_JSON=$(printf '%s' "$ESCAPED_HTML" | tr '\n' ' ')
 
           RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
@@ -236,7 +239,12 @@ jobs:
               \"type\": \"page\",
               \"title\": \"Performance Report - $TS\",
               \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
-              \"body\": {\"storage\": {\"value\": \"$ESCAPED\",\"representation\": \"storage\"}}
+              \"body\": {
+                \"storage\": {
+                  \"value\": \"$ESCAPED_JSON\",
+                  \"representation\": \"storage\"
+                }
+              }
             }" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
 
