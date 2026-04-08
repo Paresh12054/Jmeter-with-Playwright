@@ -7,11 +7,17 @@ jobs:
   performance-and-ui:
     runs-on: ubuntu-latest
 
+    env:
+      CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+      CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+      CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+      CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+
     steps:
       - uses: actions/checkout@v4
 
       # -------------------------
-      # Install tools
+      # Install dependencies
       # -------------------------
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -189,14 +195,11 @@ jobs:
           echo "</table>" >> agg.html
 
       # -------------------------
-      # Publish to Confluence
+      # Publish to Confluence (SAFE)
       # -------------------------
       - name: Publish to Confluence
         run: |
           set -e
-
-          TS=$(date +"%Y-%m-%d %H:%M:%S")
-          AGG=$(cat agg.html)
 
           CONTENT="<h1>🚀 Performance & UI Test Report</h1>
 
@@ -208,7 +211,7 @@ jobs:
           </table>
 
           <h2>📈 Transaction-Level Aggregate (SLA Enabled)</h2>
-          $AGG
+          $(cat agg.html)
 
           <h2>📊 JMeter HTML Report</h2>
           <p>Attached separately (zip file)</p>
@@ -225,26 +228,28 @@ jobs:
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          # IMPORTANT: Do NOT escape HTML tags (Confluence needs raw XHTML)
-          # Only remove newlines for JSON safety
-          ESCAPED_JSON=$(printf '%s' "$CONTENT" | tr '\n' ' ')
+          # Build JSON safely using jq (NO manual escaping)
+          JSON_BODY=$(jq -n \
+            --arg title "Performance Report - $(date +"%Y-%m-%d %H:%M:%S")" \
+            --arg content "$CONTENT" \
+            '{
+              type: "page",
+              title: $title,
+              space: { key: env.CONFLUENCE_SPACE_KEY },
+              body: {
+                storage: {
+                  value: $content,
+                  representation: "storage"
+                }
+              }
+            }')
 
-          RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+          RESPONSE=$(curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
-            -d "{
-              \"type\": \"page\",
-              \"title\": \"Performance Report - $TS\",
-              \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
-              \"body\": {
-                \"storage\": {
-                  \"value\": \"$ESCAPED_JSON\",
-                  \"representation\": \"storage\"
-                }
-              }
-            }" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
+            -d "$JSON_BODY" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/")
 
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
@@ -257,23 +262,23 @@ jobs:
           echo "Page ID: $PAGE_ID"
 
           # Attach JTL
-          curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+          curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl;filename=jmeter-results.jtl" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach HTML report
+          # Attach JMeter report
           zip -r jmeter-report.zip jmeter-report
 
-          curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+          curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@jmeter-report.zip;filename=jmeter-report.zip" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
 
           # Attach Playwright results
           for f in pw-results/*.json; do
-            curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
               -X POST -H "X-Atlassian-Token: no-check" \
               -F "file=@$f" \
-              "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+              "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
           done
