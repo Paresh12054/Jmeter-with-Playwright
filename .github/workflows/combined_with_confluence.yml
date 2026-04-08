@@ -8,9 +8,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # -------------------------
-      # Checkout
-      # -------------------------
       - uses: actions/checkout@v4
 
       # -------------------------
@@ -40,21 +37,25 @@ jobs:
       # -------------------------
       - name: Start JMeter
         run: |
+          JM_START=$(date +"%Y-%m-%d %H:%M:%S")
+          echo $JM_START > jm_start.txt
+
           nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright periodically
+      # Run Playwright
       # -------------------------
       - name: Run Playwright periodically
         run: |
           mkdir -p pw-results
 
+          PW_START=$(date +"%Y-%m-%d %H:%M:%S")
+          echo $PW_START > pw_start.txt
+
           END=$((SECONDS+600))
           PASSED=0
           FAILED=0
-
-          START_TIME=$(date +%s)
 
           while [ $SECONDS -lt $END ]; do
             TS=$(date +"%Y-%m-%d_%H-%M-%S")
@@ -74,167 +75,140 @@ jobs:
             sleep 180
           done
 
-          END_TIME=$(date +%s)
+          PW_END=$(date +"%Y-%m-%d %H:%M:%S")
+          echo $PW_END > pw_end.txt
 
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
-          echo $((END_TIME - START_TIME)) > pw_duration.txt
 
       # -------------------------
       # Stop JMeter
       # -------------------------
       - name: Stop JMeter
-        run: kill $(cat jmeter.pid) || true
+        run: |
+          kill $(cat jmeter.pid) || true
+          JM_END=$(date +"%Y-%m-%d %H:%M:%S")
+          echo $JM_END > jm_end.txt
 
       # -------------------------
       # Extract JMeter Metrics
       # -------------------------
-      - name: Extract Metrics
+      - name: Extract Metrics + Aggregate
         run: |
           TOTAL=$(($(wc -l < results.jtl) - 1))
           FAIL=$(awk -F',' 'NR>1 && $8!="true"{c++}END{print c+0}' results.jtl)
 
           AVG=$(awk -F',' 'NR>1{sum+=$2;c++}END{print int(sum/c)}' results.jtl)
 
-          P90=$(awk -F',' 'NR>1{print $2}' results.jtl | sort -n | awk '{a[NR]=$1}END{print a[int(NR*0.9)]}')
-          P95=$(awk -F',' 'NR>1{print $2}' results.jtl | sort -n | awk '{a[NR]=$1}END{print a[int(NR*0.95)]}')
-
-          USERS=$(awk -F',' 'NR>1{if($13>m)m=$13}END{print m+0}' results.jtl)
-
-          START=$(awk -F',' 'NR==2{print $1}' results.jtl)
-          END=$(awk -F',' 'END{print $1}' results.jtl)
-
-          DUR=$(( (END-START)/1000 ))
-          [ "$DUR" -eq 0 ] && DUR=1
-
-          THR=$(awk "BEGIN {printf \"%.2f\", ($TOTAL/$DUR)}")
-          ERR=$(awk "BEGIN {printf \"%.2f\", ($FAIL/$TOTAL)*100}")
-
-          echo $AVG > avg.txt
-          echo $ERR > err.txt
-          echo $P90 > p90.txt
-          echo $P95 > p95.txt
-          echo $USERS > users.txt
-          echo $DUR > dur.txt
-          echo $THR > thr.txt
           echo $TOTAL > total.txt
           echo $FAIL > fail.txt
+          echo $AVG > avg.txt
+
+          # -------------------------
+          # Aggregate Table
+          # -------------------------
+          echo "<table border='1'>" > agg.html
+          echo "<tr><th>Label</th><th>Total</th><th>Avg(ms)</th><th>Error%</th></tr>" >> agg.html
+
+          awk -F',' '
+          NR>1 {
+            label=$3
+            total[label]++
+            sum[label]+=$2
+            if($8!="true") fail[label]++
+          }
+          END {
+            for (l in total) {
+              avg=int(sum[l]/total[l])
+              err=(fail[l]/total[l])*100
+              printf "<tr><td>%s</td><td>%d</td><td>%d</td><td>%.2f</td></tr>\n", l, total[l], avg, err
+            }
+          }' results.jtl >> agg.html
+
+          echo "</table>" >> agg.html
 
       # -------------------------
-      # Confluence Connection Debug Test
+      # Confluence Connection Test
       # -------------------------
-      - name: Confluence Connection Debug Test
-        shell: bash
+      - name: Confluence Connection Test
         run: |
-          set -e
-
-          echo "🔍 Testing Confluence connection..."
-
           RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
             -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
-            -X GET \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/space?limit=1")
 
-          BODY=$(echo "$RESPONSE" | sed -n '1p')
-          STATUS=$(echo "$RESPONSE" | sed -n '2p' | cut -d':' -f2)
-
-          echo "HTTP Status: $STATUS"
-          echo "Response Body: $BODY"
+          STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d':' -f2)
 
           if [ "$STATUS" != "200" ]; then
             echo "❌ Confluence connection failed"
             exit 1
           fi
 
-          echo "✅ Confluence connection successful"
+          echo "✅ Confluence connected"
 
       # -------------------------
-      # Publish to Confluence (FIXED)
+      # Publish to Confluence
       # -------------------------
       - name: Publish to Confluence
-        shell: bash
         run: |
           set -e
 
-          TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
-          PAGE_TITLE="Performance Report - $TIMESTAMP"
+          TS=$(date +"%Y-%m-%d %H:%M:%S")
+
+          AGG=$(cat agg.html)
 
           CONTENT="<h1>🚀 Performance & UI Test Report</h1>
 
-          <p><b>Execution Time:</b> $TIMESTAMP</p>
+          <h2>⏱ Execution Timeline</h2>
+          <table border='1'>
+          <tr><th>Type</th><th>Start</th><th>End</th></tr>
+          <tr><td>JMeter</td><td>$(cat jm_start.txt)</td><td>$(cat jm_end.txt)</td></tr>
+          <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
+          </table>
 
           <h2>📊 JMeter Summary</h2>
           <table border='1'>
-          <tr><th>Metric</th><th>Value</th></tr>
-          <tr><td>Total Requests</td><td>$(cat total.txt)</td></tr>
-          <tr><td>Failures</td><td>$(cat fail.txt)</td></tr>
-          <tr><td>Error %</td><td>$(cat err.txt)</td></tr>
-          <tr><td>Avg Response</td><td>$(cat avg.txt) ms</td></tr>
-          <tr><td>P90</td><td>$(cat p90.txt) ms</td></tr>
-          <tr><td>P95</td><td>$(cat p95.txt) ms</td></tr>
-          <tr><td>Throughput</td><td>$(cat thr.txt) req/sec</td></tr>
-          <tr><td>Users</td><td>$(cat users.txt)</td></tr>
-          <tr><td>Duration</td><td>$(cat dur.txt) sec</td></tr>
+          <tr><th>Total</th><th>Failures</th><th>Avg(ms)</th></tr>
+          <tr><td>$(cat total.txt)</td><td>$(cat fail.txt)</td><td>$(cat avg.txt)</td></tr>
           </table>
+
+          <h2>📈 JMeter Aggregate (Per API)</h2>
+          $AGG
 
           <h2>🎭 Playwright Summary</h2>
           <table border='1'>
-          <tr><th>Metric</th><th>Value</th></tr>
-          <tr><td>Passed</td><td>$(cat pw_passed.txt)</td></tr>
-          <tr><td>Failed</td><td>$(cat pw_failed.txt)</td></tr>
-          <tr><td>Duration</td><td>$(cat pw_duration.txt) sec</td></tr>
-          </table>"
+          <tr><th>Passed</th><th>Failed</th></tr>
+          <tr><td>$(cat pw_passed.txt)</td><td>$(cat pw_failed.txt)</td></tr>
+          </table>
 
-          # ✅ FIX: escape newlines + quotes
+          <h2>📎 Attachments</h2>
+          <ac:structured-macro ac:name=\"attachments\"/>"
+
           ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g')
-
-          echo "Creating Confluence page..."
 
           RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "Content-Type: application/json" \
             -d "{
               \"type\": \"page\",
-              \"title\": \"$PAGE_TITLE\",
-              \"space\": {
-                \"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"
-              },
-              \"body\": {
-                \"storage\": {
-                  \"value\": \"$ESCAPED_CONTENT\",
-                  \"representation\": \"storage\"
-                }
-              }
+              \"title\": \"Performance Report - $TS\",
+              \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
+              \"body\": {\"storage\": {\"value\": \"$ESCAPED_CONTENT\",\"representation\": \"storage\"}}
             }" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
 
-          echo "Response: $RESPONSE"
-
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
-          if [ "$PAGE_ID" == "null" ] || [ -z "$PAGE_ID" ]; then
-            echo "❌ Failed to create Confluence page"
-            exit 1
-          fi
+          echo "Page ID: $PAGE_ID"
 
-          echo "✅ Page ID: $PAGE_ID"
-
-          echo "Uploading attachments..."
-
-          # Attach JMeter
+          # Attach files
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
-            -X POST \
-            -H "X-Atlassian-Token: no-check" \
+            -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach Playwright
           for f in pw-results/*.json; do
-            if [ -f "$f" ]; then
-              curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
-                -X POST \
-                -H "X-Atlassian-Token: no-check" \
-                -F "file=@$f" \
-                "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
-            fi
+            curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+              -X POST -H "X-Atlassian-Token: no-check" \
+              -F "file=@$f" \
+              "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
           done
