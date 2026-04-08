@@ -1,4 +1,4 @@
-name: JMeter + Playwright + Confluence+SLA
+name: Confluence + SLA
 
 on:
   workflow_dispatch:
