@@ -61,8 +61,8 @@ jobs:
             echo "$OUTPUT" > "$FILE"
 
             if [ -s "$FILE" ]; then
-              P=$(jq '[.. | objects | select(.status=="passed")] | length' "$FILE")
-              F=$(jq '[.. | objects | select(.status=="failed")] | length' "$FILE")
+              P=$(jq '[.. | objects? | select(.status?=="passed")] | length' "$FILE")
+              F=$(jq '[.. | objects? | select(.status?=="failed")] | length' "$FILE")
 
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
@@ -91,7 +91,7 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
       # -------------------------
-      # Aggregate + SLA (FIXED)
+      # Aggregate + SLA
       # -------------------------
       - name: Generate Aggregate Table
         run: |
@@ -115,7 +115,6 @@ jobs:
             label=$3
             success=$8
 
-            # clean values (CRITICAL FIX)
             gsub(/\r/,"",success)
             gsub(/^[ \t"]+|[ \t"]+$/, "", success)
 
@@ -173,18 +172,17 @@ jobs:
               p90_color = (p90_sla=="PASS") ? "#c6efce" : "#ffc7ce"
               overall_color = (overall=="PASS") ? "#c6efce" : "#ffc7ce"
 
-              printf "<tr>\
-<td>%s</td>\
-<td>%d</td>\
-<td>%d</td>\
-<td>%d</td>\
-<td>%d</td>\
-<td>%.2f</td>\
-<td style=\"background-color:%s\"><b>%s</b></td>\
-<td style=\"background-color:%s\"><b>%s</b></td>\
-<td style=\"background-color:%s\"><b>%s</b></td>\
-</tr>\n", \
-l,total[l],avg,p90,p95,err,avg_color,avg_sla,p90_color,p90_sla,overall_color,overall
+              printf "<tr>"
+              printf "<td>%s</td>", l
+              printf "<td>%d</td>", total[l]
+              printf "<td>%d</td>", avg
+              printf "<td>%d</td>", p90
+              printf "<td>%d</td>", p95
+              printf "<td>%.2f</td>", err
+              printf "<td style=\"background-color:%s\"><b>%s</b></td>", avg_color, avg_sla
+              printf "<td style=\"background-color:%s\"><b>%s</b></td>", p90_color, p90_sla
+              printf "<td style=\"background-color:%s\"><b>%s</b></td>", overall_color, overall
+              printf "</tr>\n"
             }
           }' results.jtl >> agg.html
 
@@ -227,11 +225,13 @@ l,total[l],avg,p90,p95,err,avg_color,avg_sla,p90_color,p90_sla,overall_color,ove
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          ESCAPED=$(printf '%s' "$CONTENT" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g')
+          # Proper XHTML escaping
+          ESCAPED=$(printf '%s' "$CONTENT" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')
 
           RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
             -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
             -d "{
               \"type\": \"page\",
               \"title\": \"Performance Report - $TS\",
@@ -242,12 +242,18 @@ l,total[l],avg,p90,p95,err,avg_color,avg_sla,p90_color,p90_sla,overall_color,ove
 
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
+          if [ "$PAGE_ID" == "null" ] || [ -z "$PAGE_ID" ]; then
+            echo "Failed to create Confluence page"
+            echo "$RESPONSE"
+            exit 1
+          fi
+
           echo "Page ID: $PAGE_ID"
 
           # Attach JTL
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST -H "X-Atlassian-Token: no-check" \
-            -F "file=@results.jtl" \
+            -F "file=@results.jtl;filename=jmeter-results.jtl" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
           # Attach HTML report
@@ -255,10 +261,10 @@ l,total[l],avg,p90,p95,err,avg_color,avg_sla,p90_color,p90_sla,overall_color,ove
 
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST -H "X-Atlassian-Token: no-check" \
-            -F "file=@jmeter-report.zip" \
+            -F "file=@jmeter-report.zip;filename=jmeter-report.zip" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach Playwright
+          # Attach Playwright results
           for f in pw-results/*.json; do
             curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
               -X POST -H "X-Atlassian-Token: no-check" \
