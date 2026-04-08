@@ -98,7 +98,7 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
       # -------------------------
-      # Extract Metrics + Aggregate
+      # Extract Metrics + CLEAN Aggregate
       # -------------------------
       - name: Extract Metrics + Aggregate
         run: |
@@ -110,16 +110,26 @@ jobs:
           echo $FAIL > fail.txt
           echo $AVG > avg.txt
 
+          # -------------------------
+          # CLEAN AGGREGATE (Transaction Controllers ONLY)
+          # -------------------------
           echo "<table border='1'>" > agg.html
-          echo "<tr><th>Label</th><th>Total</th><th>Avg</th><th>P90</th><th>P95</th><th>Error%</th></tr>" >> agg.html
+          echo "<tr><th>Transaction</th><th>Total</th><th>Avg</th><th>P90</th><th>P95</th><th>Error%</th></tr>" >> agg.html
 
           awk -F',' '
           NR>1 {
             label=$3
-            total[label]++
-            sum[label]+=$2
-            if($8!="true") fail[label]++
-            times[label]=times[label] " " $2
+            success=$8
+
+            # ✅ FILTER: Only parent samples (Transaction Controllers)
+            # Works when "Generate parent sample" is enabled
+            if (label !~ /\./) {
+
+              total[label]++
+              sum[label]+=$2
+              if(success!="true") fail[label]++
+              times[label]=times[label] " " $2
+            }
           }
           END {
             for (l in total) {
@@ -157,11 +167,11 @@ jobs:
           <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
           </table>
 
-          <h2>📈 JMeter Aggregate (Per API)</h2>
+          <h2>📈 Transaction-Level Aggregate</h2>
           $AGG
 
           <h2>📊 JMeter HTML Report</h2>
-          <p>Download full HTML dashboard from attachments.</p>
+          <p>Download full report from attachments (jmeter-report.zip)</p>
 
           <h2>🎭 Playwright Summary</h2>
           <table border='1'>
@@ -189,13 +199,13 @@ jobs:
 
           echo "Page ID: $PAGE_ID"
 
-          # Attach JMeter results
+          # Attach JMeter raw
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach HTML report (zip it first)
+          # Attach HTML report
           zip -r jmeter-report.zip jmeter-report
 
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
@@ -203,7 +213,7 @@ jobs:
             -F "file=@jmeter-report.zip" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach Playwright
+          # Attach Playwright results
           for f in pw-results/*.json; do
             curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
               -X POST -H "X-Atlassian-Token: no-check" \
