@@ -37,9 +37,7 @@ jobs:
       # -------------------------
       - name: Start JMeter
         run: |
-          JM_START=$(date +"%Y-%m-%d %H:%M:%S")
-          echo $JM_START > jm_start.txt
-
+          date +"%Y-%m-%d %H:%M:%S" > jm_start.txt
           nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
           echo $! > jmeter.pid
 
@@ -49,9 +47,7 @@ jobs:
       - name: Run Playwright periodically
         run: |
           mkdir -p pw-results
-
-          PW_START=$(date +"%Y-%m-%d %H:%M:%S")
-          echo $PW_START > pw_start.txt
+          date +"%Y-%m-%d %H:%M:%S" > pw_start.txt
 
           END=$((SECONDS+600))
           PASSED=0
@@ -75,9 +71,7 @@ jobs:
             sleep 180
           done
 
-          PW_END=$(date +"%Y-%m-%d %H:%M:%S")
-          echo $PW_END > pw_end.txt
-
+          date +"%Y-%m-%d %H:%M:%S" > pw_end.txt
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
 
@@ -87,8 +81,7 @@ jobs:
       - name: Stop JMeter
         run: |
           kill $(cat jmeter.pid) || true
-          JM_END=$(date +"%Y-%m-%d %H:%M:%S")
-          echo $JM_END > jm_end.txt
+          date +"%Y-%m-%d %H:%M:%S" > jm_end.txt
 
       # -------------------------
       # Generate JMeter HTML Report
@@ -98,44 +91,77 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
       # -------------------------
-      # Extract Metrics + Aggregate
+      # Aggregate + SLA (FIXED)
       # -------------------------
-      - name: Extract Metrics + Aggregate
+      - name: Generate Aggregate Table
         run: |
-          TOTAL=$(($(wc -l < results.jtl) - 1))
-          FAIL=$(awk -F',' 'NR>1 && $8!="true"{c++}END{print c+0}' results.jtl)
-          AVG=$(awk -F',' 'NR>1{sum+=$2;c++}END{print int(sum/c)}' results.jtl)
+          echo "<table border='1' style='border-collapse: collapse;'>" > agg.html
 
-          echo $TOTAL > total.txt
-          echo $FAIL > fail.txt
-          echo $AVG > avg.txt
-
-          echo "<table border='1'>" > agg.html
-          echo "<tr><th>Transaction</th><th>Total</th><th>Avg</th><th>P90</th><th>P95</th><th>Error%</th></tr>" >> agg.html
+          echo "<tr>
+          <th>Transaction</th>
+          <th>Total</th>
+          <th>Avg (ms)</th>
+          <th>P90 (ms)</th>
+          <th>P95 (ms)</th>
+          <th>Error %</th>
+          <th>Avg SLA</th>
+          <th>P90 SLA</th>
+          <th>Overall SLA</th>
+          </tr>" >> agg.html
 
           awk -F',' '
           NR>1 {
             label=$3
-            success=$8
+            success=tolower($8)
 
-            if (label !~ /\./) {
+            if (label ~ /^PT[0-9]+_/) {
               total[label]++
               sum[label]+=$2
+
               if(success!="true") fail[label]++
+
               times[label]=times[label] " " $2
             }
           }
           END {
             for (l in total) {
+
               n=split(times[l], arr, " ")
-              asort(arr)
 
-              p90=arr[int(n*0.9)]
-              p95=arr[int(n*0.95)]
-              avg=int(sum[l]/total[l])
-              err=(fail[l]/total[l])*100
+              idx=0
+              for(i=1;i<=n;i++){
+                if(arr[i]!=""){
+                  clean[++idx]=arr[i]
+                }
+              }
+              n=idx
 
-              printf "<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%.2f</td></tr>\n", l, total[l], avg, p90, p95, err
+              for(i=1;i<=n;i++){
+                for(j=i+1;j<=n;j++){
+                  if(clean[i]>clean[j]){
+                    tmp=clean[i]; clean[i]=clean[j]; clean[j]=tmp
+                  }
+                }
+              }
+
+              p90_index = int((n*90 + 99)/100)
+              p95_index = int((n*95 + 99)/100)
+
+              p90 = clean[p90_index]
+              p95 = clean[p95_index]
+
+              avg = int(sum[l]/total[l])
+              err = (fail[l]/total[l])*100
+
+              avg_sla = (avg <= 1000) ? "PASS" : "FAIL"
+              p90_sla = (p90 <= 3000) ? "PASS" : "FAIL"
+              overall = (avg_sla=="PASS" && p90_sla=="PASS") ? "PASS" : "FAIL"
+
+              avg_color = (avg_sla=="PASS") ? "#c6efce" : "#ffc7ce"
+              p90_color = (p90_sla=="PASS") ? "#c6efce" : "#ffc7ce"
+              overall_color = (overall=="PASS") ? "#c6efce" : "#ffc7ce"
+
+              printf "<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%.2f</td><td style=\"background-color:%s\"><b>%s</b></td><td style=\"background-color:%s\"><b>%s</b></td><td style=\"background-color:%s\"><b>%s</b></td></tr>\n", l,total[l],avg,p90,p95,err,avg_color,avg_sla,p90_color,p90_sla,overall_color,overall
             }
           }' results.jtl >> agg.html
 
@@ -149,7 +175,6 @@ jobs:
           set -e
 
           TS=$(date +"%Y-%m-%d %H:%M:%S")
-
           AGG=$(cat agg.html)
 
           CONTENT="<h1>🚀 Performance & UI Test Report</h1>
@@ -161,7 +186,7 @@ jobs:
           <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
           </table>
 
-          <h2>📈 Transaction-Level Aggregate</h2>
+          <h2>📈 Transaction-Level Aggregate (SLA Enabled)</h2>
           $AGG
 
           <h2>📊 JMeter HTML Report</h2>
@@ -174,12 +199,12 @@ jobs:
           </table>
 
           <h2>📝 Observations</h2>
-          <p><i>👉 Please add your observations, findings, bottlenecks, and recommendations here.</i></p>
-          
+          <p><i>👉 Add your observations manually here.</i></p>
+
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g')
+          ESCAPED=$(printf '%s' "$CONTENT" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g')
 
           RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
@@ -188,7 +213,7 @@ jobs:
               \"type\": \"page\",
               \"title\": \"Performance Report - $TS\",
               \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
-              \"body\": {\"storage\": {\"value\": \"$ESCAPED_CONTENT\",\"representation\": \"storage\"}}
+              \"body\": {\"storage\": {\"value\": \"$ESCAPED\",\"representation\": \"storage\"}}
             }" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
 
@@ -196,13 +221,11 @@ jobs:
 
           echo "Page ID: $PAGE_ID"
 
-          # Attach JMeter raw
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach HTML report
           zip -r jmeter-report.zip jmeter-report
 
           curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
@@ -210,7 +233,6 @@ jobs:
             -F "file=@jmeter-report.zip" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach Playwright results
           for f in pw-results/*.json; do
             curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
               -X POST -H "X-Atlassian-Token: no-check" \
