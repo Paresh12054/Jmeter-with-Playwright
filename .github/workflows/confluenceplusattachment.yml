@@ -37,8 +37,7 @@ jobs:
       # -------------------------
       - name: Start JMeter
         run: |
-          JM_START=$(date +"%Y-%m-%d %H:%M:%S")
-          echo $JM_START > jm_start.txt
+          date +"%Y-%m-%d %H:%M:%S" > jm_start.txt
 
           nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
           echo $! > jmeter.pid
@@ -50,8 +49,7 @@ jobs:
         run: |
           mkdir -p pw-results
 
-          PW_START=$(date +"%Y-%m-%d %H:%M:%S")
-          echo $PW_START > pw_start.txt
+          date +"%Y-%m-%d %H:%M:%S" > pw_start.txt
 
           END=$((SECONDS+600))
           PASSED=0
@@ -75,8 +73,7 @@ jobs:
             sleep 180
           done
 
-          PW_END=$(date +"%Y-%m-%d %H:%M:%S")
-          echo $PW_END > pw_end.txt
+          date +"%Y-%m-%d %H:%M:%S" > pw_end.txt
 
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
@@ -87,8 +84,7 @@ jobs:
       - name: Stop JMeter
         run: |
           kill $(cat jmeter.pid) || true
-          JM_END=$(date +"%Y-%m-%d %H:%M:%S")
-          echo $JM_END > jm_end.txt
+          date +"%Y-%m-%d %H:%M:%S" > jm_end.txt
 
       # -------------------------
       # Generate JMeter HTML Report
@@ -98,9 +94,9 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
       # -------------------------
-      # Extract Metrics + SLA + Aggregate
+      # Aggregate + SLA
       # -------------------------
-      - name: Extract Metrics + Aggregate
+      - name: Generate Aggregate Table
         run: |
           echo "<table border='1' style='border-collapse: collapse;'>" > agg.html
 
@@ -111,8 +107,8 @@ jobs:
           <th>P90 (ms)</th>
           <th>P95 (ms)</th>
           <th>Error %</th>
-          <th>Avg SLA (≤1000ms)</th>
-          <th>P90 SLA (≤3000ms)</th>
+          <th>Avg SLA</th>
+          <th>P90 SLA</th>
           <th>Overall SLA</th>
           </tr>" >> agg.html
 
@@ -135,7 +131,6 @@ jobs:
             for (l in total) {
               n=split(times[l], arr, " ")
 
-              # sort array
               for(i=1;i<=n;i++){
                 for(j=i+1;j<=n;j++){
                   if(arr[i]>arr[j]){
@@ -154,24 +149,13 @@ jobs:
 
               if (avg_sla=="PASS" && p90_sla=="PASS") {
                 overall="PASS"
-                color="#c6efce"   # green
+                color="#c6efce"
               } else {
                 overall="FAIL"
-                color="#ffc7ce"   # red
+                color="#ffc7ce"
               }
 
-              printf "<tr style='background-color:%s'>
-                <td>%s</td>
-                <td>%d</td>
-                <td>%d</td>
-                <td>%d</td>
-                <td>%d</td>
-                <td>%.2f</td>
-                <td>%s</td>
-                <td>%s</td>
-                <td><b>%s</b></td>
-                </tr>\n",
-              color,l,total[l],avg,p90,p95,err,avg_sla,p90_sla,overall
+              printf "<tr style=\"background-color:%s\"><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%.2f</td><td>%s</td><td>%s</td><td><b>%s</b></td></tr>\n", color, l, total[l], avg, p90, p95, err, avg_sla, p90_sla, overall
             }
           }' results.jtl >> agg.html
 
@@ -185,7 +169,6 @@ jobs:
           set -e
 
           TS=$(date +"%Y-%m-%d %H:%M:%S")
-
           AGG=$(cat agg.html)
 
           CONTENT="<h1>🚀 Performance & UI Test Report</h1>
@@ -215,7 +198,7 @@ jobs:
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          ESCAPED_CONTENT=$(printf '%s' "$CONTENT" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g')
+          ESCAPED=$(printf '%s' "$CONTENT" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g')
 
           RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
             -X POST \
@@ -224,7 +207,7 @@ jobs:
               \"type\": \"page\",
               \"title\": \"Performance Report - $TS\",
               \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
-              \"body\": {\"storage\": {\"value\": \"$ESCAPED_CONTENT\",\"representation\": \"storage\"}}
+              \"body\": {\"storage\": {\"value\": \"$ESCAPED\",\"representation\": \"storage\"}}
             }" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
 
@@ -246,7 +229,7 @@ jobs:
             -F "file=@jmeter-report.zip" \
             "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach Playwright results
+          # Attach Playwright
           for f in pw-results/*.json; do
             curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
               -X POST -H "X-Atlassian-Token: no-check" \
