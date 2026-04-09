@@ -16,9 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # -------------------------
-      # Install tools
-      # -------------------------
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq zip
 
@@ -29,14 +26,20 @@ jobs:
       - run: npm install
       - run: npx playwright install --with-deps
 
-      # -------------------------
-      # Install JMeter
-      # -------------------------
       - name: Install JMeter
         run: |
           wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.tgz
           tar -xzf apache-jmeter-5.6.3.tgz
           mv apache-jmeter-5.6.3 jmeter
+
+      # -------------------------
+      # Load SLA Config
+      # -------------------------
+      - name: Load SLA Config
+        run: |
+          echo "SLA_AVG=$(jq '.avg_ms' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_P90=$(jq '.p90_ms' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_ERR=$(jq '.error_percent' config/sla.json)" >> $GITHUB_ENV
 
       # -------------------------
       # Start JMeter
@@ -48,7 +51,7 @@ jobs:
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright
+      # Run Playwright (4 runs tracked)
       # -------------------------
       - name: Run Playwright periodically
         run: |
@@ -56,15 +59,30 @@ jobs:
           date +"%Y-%m-%d %H:%M:%S" > pw_start.txt
 
           END=$((SECONDS+600))
+
           PASSED=0
           FAILED=0
 
+          RUN_INDEX=1
+          RUN_SUMMARY_FILE=pw_runs_summary.txt
+          echo "Run,Start,End,Duration(sec),Passed,Failed" > $RUN_SUMMARY_FILE
+
           while [ $SECONDS -lt $END ]; do
+            echo "Running Playwright iteration $RUN_INDEX..."
+
+            TS_START=$(date +"%Y-%m-%d %H:%M:%S")
+            START_SEC=$(date +%s)
+
             TS=$(date +"%Y-%m-%d_%H-%M-%S")
             FILE="pw-results/result-$TS.json"
 
             OUTPUT=$(npx playwright test tests/Demo1.spec.ts --reporter=json || true)
             echo "$OUTPUT" > "$FILE"
+
+            END_SEC=$(date +%s)
+            TS_END=$(date +"%Y-%m-%d %H:%M:%S")
+
+            DURATION=$((END_SEC - START_SEC))
 
             if [ -s "$FILE" ]; then
               P=$(jq '[.. | objects | select(.status=="passed")] | length' "$FILE")
@@ -72,7 +90,14 @@ jobs:
 
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
+            else
+              P=0
+              F=0
             fi
+
+            echo "$RUN_INDEX,$TS_START,$TS_END,$DURATION,$P,$F" >> $RUN_SUMMARY_FILE
+
+            RUN_INDEX=$((RUN_INDEX+1))
 
             sleep 180
           done
@@ -97,7 +122,7 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
       # -------------------------
-      # Aggregate Table (ONLY macros updated)
+      # Aggregate Table (SLA dynamic)
       # -------------------------
       - name: Generate Aggregate Table
         run: |
@@ -115,9 +140,8 @@ jobs:
           <th>Overall SLA</th>
           </tr>" >> agg.html
 
-          awk -F',' '
+          awk -v sla_avg="$SLA_AVG" -v sla_p90="$SLA_P90" -F',' '
           NR>1 {
-
             label=$3
             success=tolower($8)
 
@@ -125,13 +149,10 @@ jobs:
             gsub(/^[ \t"]+|[ \t"]+$/, "", success)
 
             if (label ~ /^PT[0-9]+_/) {
-
               total[label]++
               sum[label]+=$2
 
-              if (success == "false" || success == "0") {
-                fail[label]++
-              }
+              if (success == "false" || success == "0") fail[label]++
 
               times[label]=times[label] " " $2
             }
@@ -143,9 +164,7 @@ jobs:
 
               idx=0
               for(i=1;i<=n;i++){
-                if(arr[i]!=""){
-                  clean[++idx]=arr[i]
-                }
+                if(arr[i]!="") clean[++idx]=arr[i]
               }
               n=idx
 
@@ -164,11 +183,10 @@ jobs:
               p95 = clean[p95_index]
 
               avg = int(sum[l]/total[l])
-
               err = (total[l] > 0) ? (fail[l]/total[l])*100 : 0
 
-              avg_sla = (avg <= 1000) ? "PASS" : "FAIL"
-              p90_sla = (p90 <= 3000) ? "PASS" : "FAIL"
+              avg_sla = (avg <= sla_avg) ? "PASS" : "FAIL"
+              p90_sla = (p90 <= sla_p90) ? "PASS" : "FAIL"
               overall = (avg_sla=="PASS" && p90_sla=="PASS") ? "PASS" : "FAIL"
 
               printf "<tr>"
@@ -178,13 +196,9 @@ jobs:
               printf "<td>%d</td>", p90
               printf "<td>%d</td>", p95
               printf "<td>%.2f</td>", err
-
               printf "<td>%s</td>", (avg_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
-
               printf "<td>%s</td>", (p90_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
-
               printf "<td>%s</td>", (overall=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
-
               printf "</tr>\n"
             }
           }' results.jtl >> agg.html
@@ -198,6 +212,14 @@ jobs:
         run: |
           CONTENT="<h1>🚀 Performance & UI Test Report</h1>
 
+          <h2>📏 SLA Configuration</h2>
+          <table border='1'>
+          <tr><th>Metric</th><th>Threshold</th></tr>
+          <tr><td>Avg (ms)</td><td>$SLA_AVG</td></tr>
+          <tr><td>P90 (ms)</td><td>$SLA_P90</td></tr>
+          <tr><td>Error %</td><td>$SLA_ERR</td></tr>
+          </table>
+
           <h2>⏱ Execution Timeline</h2>
           <table border='1'>
           <tr><th>Type</th><th>Start</th><th>End</th></tr>
@@ -205,28 +227,43 @@ jobs:
             <td>JMeter</td>
             <td>$(cat jm_start.txt)</td>
             <td>$(cat jm_end.txt)</td>
-            </tr>
-            <tr>
+          </tr>
+          <tr>
             <td>Playwright</td>
             <td>$(cat pw_start.txt)</td>
             <td>$(cat pw_end.txt)</td>
           </tr>
           </table>
 
-          <h2>📈 Transaction-Level Aggregate (SLA Enabled)</h2>
+          <h2>📈 Transaction-Level Aggregate</h2>
           $(cat agg.html)
+
+          <h2>🎭 Playwright Summary (All Runs)</h2>
+          <table border='1'>
+          <tr>
+            <th>Run</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Duration (sec)</th>
+            <th>Passed</th>
+            <th>Failed</th>
+          </tr>
+
+          $(tail -n +2 pw_runs_summary.txt | awk -F',' '{
+            printf "<tr>"
+            printf "<td>%s</td>", $1
+            printf "<td>%s</td>", $2
+            printf "<td>%s</td>", $3
+            printf "<td>%s</td>", $4
+            printf "<td>%s</td>", $5
+            printf "<td>%s</td>", $6
+            printf "</tr>\n"
+          }')
+
+          </table>
 
           <h2>📊 JMeter HTML Report</h2>
           <p>Attached separately (zip file)</p>
-
-          <h2>🎭 Playwright Summary</h2>
-          <table border='1'>
-          <tr><th>Passed</th><th>Failed</th></tr>
-          <tr>
-            <td>$(cat pw_passed.txt)</td>
-            <td>$(cat pw_failed.txt)</td>
-          </tr>
-          </table>
 
           <h2>📝 Observations</h2>
           <p><i>Add observations, bottlenecks, and recommendations here.</i></p>
@@ -245,28 +282,24 @@ jobs:
               storage: {
                 value: $content,
                 representation: "storage"
+              }
             }
-          }
           }')
 
-            RESPONSE=$(curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -d "$JSON" \
-            "$CONFLUENCE_BASE_URL/rest/api/content")
+          RESPONSE=$(curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -d "$JSON" \
+          "$CONFLUENCE_BASE_URL/rest/api/content")
 
-            PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
-
-            echo "PAGE_ID=$PAGE_ID" >> $GITHUB_ENV
-            echo "Created Page: $PAGE_ID"
+          PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
+          echo "PAGE_ID=$PAGE_ID" >> $GITHUB_ENV
 
       # -------------------------
-      # Upload Attachments (FIXED)
+      # Upload Attachments
       # -------------------------
       - name: Upload Attachments
         run: |
-          echo "Uploading to Page: $PAGE_ID"
-
           curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
