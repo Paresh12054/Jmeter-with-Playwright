@@ -112,14 +112,27 @@ jobs:
           import matplotlib.pyplot as plt
 
           df = pd.read_csv("results.jtl")
+
+          # Convert timestamp
           df['timeStamp'] = pd.to_datetime(df['timeStamp'], unit='ms')
+
+          # ✅ Filter ONLY Transaction Controllers (PT...)
+          df = df[df['label'].str.startswith('PT', na=False)]
+
+          # Sort
           df = df.sort_values('timeStamp')
 
+          # ✅ Aggregate (group by time window - 10 seconds)
+          df.set_index('timeStamp', inplace=True)
+          agg = df['elapsed'].resample('10S').mean()
+
+          # Plot
           plt.figure()
-          plt.plot(df['timeStamp'], df['elapsed'])
+          plt.plot(agg.index, agg.values)
+
           plt.xlabel("Time")
-          plt.ylabel("Response Time (ms)")
-          plt.title("JMeter Response Time Over Time")
+          plt.ylabel("Avg Response Time (ms)")
+          plt.title("Transaction Controller Response Time (PT*)")
           plt.xticks(rotation=45)
 
           plt.tight_layout()
