@@ -17,11 +17,11 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Create Confluence Page with Colors
+      - name: Create Confluence Page with Status Macros
         run: |
           set -e
 
-          CONTENT="<h1>🎨 Confluence Color Test</h1>
+          CONTENT="<h1>🎨 Confluence Status Macro Test</h1>
 
           <table border='1' style='border-collapse: collapse; width:50%;'>
             <tr>
@@ -30,16 +30,26 @@ jobs:
             </tr>
             <tr>
               <td>PASS</td>
-              <td style='background-color:#c6efce;'><b>GREEN</b></td>
+              <td>
+                <ac:structured-macro ac:name=\"status\">
+                  <ac:parameter ac:name=\"colour\">Green</ac:parameter>
+                  <ac:parameter ac:name=\"title\">PASS</ac:parameter>
+                </ac:structured-macro>
+              </td>
             </tr>
             <tr>
               <td>FAIL</td>
-              <td style='background-color:#ffc7ce;'><b>RED</b></td>
+              <td>
+                <ac:structured-macro ac:name=\"status\">
+                  <ac:parameter ac:name=\"colour\">Red</ac:parameter>
+                  <ac:parameter ac:name=\"title\">FAIL</ac:parameter>
+                </ac:structured-macro>
+              </td>
             </tr>
           </table>
 
-          <p>If colors are visible → styling works ✅</p>
-          <p>If no colors → Confluence strips styles ❌</p>
+          <p>If you see colored badges → ✅ SUCCESS</p>
+          <p>This is the correct way to display status in Confluence</p>
           "
 
           JSON_BODY=$(jq -n \
@@ -67,7 +77,7 @@ jobs:
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
           if [ "$PAGE_ID" == "null" ] || [ -z "$PAGE_ID" ]; then
-            echo "Failed to create page"
+            echo "❌ Failed to create page"
             echo "$RESPONSE"
             exit 1
           fi
