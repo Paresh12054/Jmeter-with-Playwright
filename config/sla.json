@@ -1,4 +1,5 @@
 {
   "avg_ms": 1000,
-  "p90_ms": 3000
+  "p90_ms": 3000,
+  "error_percent": 1
 }
