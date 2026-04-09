@@ -1,37 +1,75 @@
-name: Confluence Connection Test
+name: Confluence Color Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  test-confluence:
+  test-confluence-colors:
     runs-on: ubuntu-latest
 
+    env:
+      CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+      CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+      CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+      CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+
     steps:
-      - name: Test Confluence API Connection
-        shell: bash
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Create Confluence Page with Colors
         run: |
           set -e
 
-          TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
-          PAGE_TITLE="GitHub Connection Test - $TIMESTAMP"
+          CONTENT="<h1>🎨 Confluence Color Test</h1>
 
-          CONTENT="<h1>Connection Successful ✅</h1><p>Created from GitHub Actions.</p><p><b>Timestamp:</b> $TIMESTAMP</p>"
+          <table border='1' style='border-collapse: collapse; width:50%;'>
+            <tr>
+              <th>Status</th>
+              <th>Result</th>
+            </tr>
+            <tr>
+              <td>PASS</td>
+              <td style='background-color:#c6efce;'><b>GREEN</b></td>
+            </tr>
+            <tr>
+              <td>FAIL</td>
+              <td style='background-color:#ffc7ce;'><b>RED</b></td>
+            </tr>
+          </table>
 
-          curl -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"type\": \"page\",
-              \"title\": \"$PAGE_TITLE\",
-              \"space\": {
-                \"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"
-              },
-              \"body\": {
-                \"storage\": {
-                  \"value\": \"$CONTENT\",
-                  \"representation\": \"storage\"
+          <p>If colors are visible → styling works ✅</p>
+          <p>If no colors → Confluence strips styles ❌</p>
+          "
+
+          JSON_BODY=$(jq -n \
+            --arg title "Color Test - $(date +"%Y-%m-%d %H:%M:%S")" \
+            --arg content "$CONTENT" \
+            '{
+              type: "page",
+              title: $title,
+              space: { key: env.CONFLUENCE_SPACE_KEY },
+              body: {
+                storage: {
+                  value: $content,
+                  representation: "storage"
                 }
               }
-            }" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/"
+            }')
+
+          RESPONSE=$(curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -d "$JSON_BODY" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/")
+
+          PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+          if [ "$PAGE_ID" == "null" ] || [ -z "$PAGE_ID" ]; then
+            echo "Failed to create page"
+            echo "$RESPONSE"
+            exit 1
+          fi
+
+          echo "✅ Page created successfully: $PAGE_ID"
