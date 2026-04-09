@@ -20,7 +20,7 @@ jobs:
       # Install dependencies
       # -------------------------
       - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq zip
 
       - uses: actions/setup-node@v4
         with:
@@ -48,7 +48,7 @@ jobs:
           echo $! > jmeter.pid
 
       # -------------------------
-      # Run Playwright periodically
+      # Run Playwright
       # -------------------------
       - name: Run Playwright periodically
         run: |
@@ -60,8 +60,7 @@ jobs:
           FAILED=0
 
           while [ $SECONDS -lt $END ]; do
-            TS=$(date +"%Y-%m-%d_%H-%M-%S")
-            FILE="pw-results/result-$TS.json"
+            FILE="pw-results/result-$(date +%s).json"
 
             OUTPUT=$(npx playwright test tests/Demo1.spec.ts --reporter=json || true)
             echo "$OUTPUT" > "$FILE"
@@ -90,104 +89,42 @@ jobs:
           date +"%Y-%m-%d %H:%M:%S" > jm_end.txt
 
       # -------------------------
-      # Generate JMeter HTML Report
+      # Generate Report
       # -------------------------
-      - name: Generate JMeter HTML Report
-        run: |
-          ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
+      - name: Generate JMeter Report
+        run: ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
       # -------------------------
-      # Aggregate Table (FIXED + STATUS MACROS)
+      # Aggregate Table
       # -------------------------
       - name: Generate Aggregate Table
         run: |
-          echo "<table border='1' style='border-collapse: collapse; width:100%;'>" > agg.html
-
-          echo "<tr>
-          <th>Transaction</th>
-          <th>Total</th>
-          <th>Avg (ms)</th>
-          <th>P90 (ms)</th>
-          <th>P95 (ms)</th>
-          <th>Error %</th>
-          <th>Avg SLA</th>
-          <th>P90 SLA</th>
-          <th>Overall SLA</th>
-          </tr>" >> agg.html
+          echo "<table border='1'>" > agg.html
+          echo "<tr><th>Txn</th><th>Total</th><th>Avg</th><th>P90</th><th>Error%</th><th>Status</th></tr>" >> agg.html
 
           awk -F',' '
           NR>1 {
-
             label=$3
             success=tolower($8)
 
             gsub(/\r/,"",success)
             gsub(/^[ \t"]+|[ \t"]+$/, "", success)
 
-            if (label ~ /^PT[0-9]+_/) {
+            total[label]++
+            sum[label]+=$2
 
-              total[label]++
-              sum[label]+=$2
-
-              if (success == "false" || success == "0") {
-                fail[label]++
-              }
-
-              times[label]=times[label] " " $2
-            }
+            if (success=="false" || success=="0") fail[label]++
           }
           END {
             for (l in total) {
-
-              n=split(times[l], arr, " ")
-
-              idx=0
-              for(i=1;i<=n;i++){
-                if(arr[i]!=""){
-                  clean[++idx]=arr[i]
-                }
-              }
-              n=idx
-
-              for(i=1;i<=n;i++){
-                for(j=i+1;j<=n;j++){
-                  if(clean[i]>clean[j]){
-                    tmp=clean[i]; clean[i]=clean[j]; clean[j]=tmp
-                  }
-                }
-              }
-
-              p90_index = int((n*90 + 99)/100)
-              p95_index = int((n*95 + 99)/100)
-
-              p90 = clean[p90_index]
-              p95 = clean[p95_index]
-
               avg = int(sum[l]/total[l])
+              err = (fail[l]/total[l])*100
 
-              err = (total[l] > 0) ? (fail[l]/total[l])*100 : 0
+              status = (avg < 1000 && err < 1) ? "PASS" : "FAIL"
 
-              avg_sla = (avg <= 1000) ? "PASS" : "FAIL"
-              p90_sla = (p90 <= 3000) ? "PASS" : "FAIL"
-              overall = (avg_sla=="PASS" && p90_sla=="PASS") ? "PASS" : "FAIL"
+              macro = (status=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
 
-              avg_macro = (avg_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
-
-              p90_macro = (p90_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
-
-              overall_macro = (overall=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
-
-              printf "<tr>"
-              printf "<td>%s</td>", l
-              printf "<td>%d</td>", total[l]
-              printf "<td>%d</td>", avg
-              printf "<td>%d</td>", p90
-              printf "<td>%d</td>", p95
-              printf "<td>%.2f</td>", err
-              printf "<td>%s</td>", avg_macro
-              printf "<td>%s</td>", p90_macro
-              printf "<td>%s</td>", overall_macro
-              printf "</tr>\n"
+              printf "<tr><td>%s</td><td>%d</td><td>%d</td><td>-</td><td>%.2f</td><td>%s</td></tr>\n", l,total[l],avg,err,macro
             }
           }' results.jtl >> agg.html
 
@@ -198,50 +135,67 @@ jobs:
       # -------------------------
       - name: Publish to Confluence
         run: |
-          set -e
+          CONTENT="<h1>🚀 Performance Report</h1>
+          <h2>Timeline</h2>
+          <p>JMeter: $(cat jm_start.txt) → $(cat jm_end.txt)</p>
+          <p>Playwright: $(cat pw_start.txt) → $(cat pw_end.txt)</p>
 
-          CONTENT="<h1>🚀 Performance & UI Test Report</h1>
-
-          <h2>⏱ Execution Timeline</h2>
-          <table border='1'>
-          <tr><th>Type</th><th>Start</th><th>End</th></tr>
-          <tr><td>JMeter</td><td>$(cat jm_start.txt)</td><td>$(cat jm_end.txt)</td></tr>
-          <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
-          </table>
-
-          <h2>📈 Transaction-Level Aggregate</h2>
+          <h2>Results</h2>
           $(cat agg.html)
 
-          <h2>🎭 Playwright Summary</h2>
-          <table border='1'>
-          <tr><th>Passed</th><th>Failed</th></tr>
-          <tr><td>$(cat pw_passed.txt)</td><td>$(cat pw_failed.txt)</td></tr>
-          </table>
+          <h2>Playwright</h2>
+          <p>Passed: $(cat pw_passed.txt)</p>
+          <p>Failed: $(cat pw_failed.txt)</p>
 
-          <h2>📎 Attachments</h2>
+          <h2>Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          JSON_BODY=$(jq -n \
-            --arg title "Performance Report - $(date +"%Y-%m-%d %H:%M:%S")" \
+          JSON=$(jq -n \
+            --arg title "Perf Report $(date +%s)" \
             --arg content "$CONTENT" \
             '{
-              type: "page",
-              title: $title,
-              space: { key: env.CONFLUENCE_SPACE_KEY },
-              body: {
-                storage: {
-                  value: $content,
-                  representation: "storage"
-                }
-              }
+              type:"page",
+              title:$title,
+              space:{key:env.CONFLUENCE_SPACE_KEY},
+              body:{storage:{value:$content,representation:"storage"}}
             }')
 
           RESPONSE=$(curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-            -X POST \
             -H "Content-Type: application/json" \
-            -d "$JSON_BODY" \
-            "$CONFLUENCE_BASE_URL/rest/api/content/")
+            -X POST \
+            -d "$JSON" \
+            "$CONFLUENCE_BASE_URL/rest/api/content")
 
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
           echo "Page ID: $PAGE_ID"
+
+      # -------------------------
+      # Attach Files (FIXED)
+      # -------------------------
+      - name: Upload Attachments
+        run: |
+          set -e
+
+          echo "Uploading JTL..."
+          curl -f -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -H "X-Atlassian-Token: no-check" \
+            -F "file=@results.jtl" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+
+          echo "Zipping report..."
+          zip -r jmeter-report.zip jmeter-report
+
+          echo "Uploading report zip..."
+          curl -f -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -H "X-Atlassian-Token: no-check" \
+            -F "file=@jmeter-report.zip" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+
+          echo "Uploading Playwright files..."
+          for f in pw-results/*.json; do
+            curl -f -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+              -H "X-Atlassian-Token: no-check" \
+              -F "file=@$f" \
+              "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+          done
