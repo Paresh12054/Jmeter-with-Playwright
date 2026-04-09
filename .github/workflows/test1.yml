@@ -129,24 +129,23 @@ jobs:
           pip install matplotlib pandas
 
           python << 'EOF'
-import pandas as pd
-import matplotlib.pyplot as plt
+          import pandas as pd
+          import matplotlib.pyplot as plt
 
-df = pd.read_csv("results.jtl")
+          df = pd.read_csv("results.jtl")
+          df['timeStamp'] = pd.to_datetime(df['timeStamp'], unit='ms')
+          df = df.sort_values('timeStamp')
 
-df['timeStamp'] = pd.to_datetime(df['timeStamp'], unit='ms')
-df = df.sort_values('timeStamp')
+          plt.figure()
+          plt.plot(df['timeStamp'], df['elapsed'])
+          plt.xlabel("Time")
+          plt.ylabel("Response Time (ms)")
+          plt.title("JMeter Response Time Over Time")
+          plt.xticks(rotation=45)
 
-plt.figure()
-plt.plot(df['timeStamp'], df['elapsed'])
-plt.xlabel("Time")
-plt.ylabel("Response Time (ms)")
-plt.title("JMeter Response Time Over Time")
-plt.xticks(rotation=45)
-
-plt.tight_layout()
-plt.savefig("response_time.png")
-EOF
+          plt.tight_layout()
+          plt.savefig("response_time.png")
+          EOF
 
       # -------------------------
       # Aggregate Table (SLA dynamic)
