@@ -97,13 +97,13 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
       # -------------------------
-      # Aggregate Table
+      # Aggregate Table (FIXED + STATUS MACROS)
       # -------------------------
       - name: Generate Aggregate Table
         run: |
-          echo "<table border='1' style='border-collapse: collapse; width:100%; font-family: Arial;'>" > agg.html
+          echo "<table border='1' style='border-collapse: collapse; width:100%;'>" > agg.html
 
-          echo "<tr style='background-color:#f2f2f2;'>
+          echo "<tr>
           <th>Transaction</th>
           <th>Total</th>
           <th>Avg (ms)</th>
@@ -119,7 +119,7 @@ jobs:
           NR>1 {
 
             label=$3
-            success=$8
+            success=tolower($8)
 
             gsub(/\r/,"",success)
             gsub(/^[ \t"]+|[ \t"]+$/, "", success)
@@ -129,7 +129,7 @@ jobs:
               total[label]++
               sum[label]+=$2
 
-              if (success != "true") {
+              if (success == "false" || success == "0") {
                 fail[label]++
               }
 
@@ -165,18 +165,17 @@ jobs:
 
               avg = int(sum[l]/total[l])
 
-              err = 0
-              if (total[l] > 0) {
-                err = (fail[l]/total[l])*100
-              }
+              err = (total[l] > 0) ? (fail[l]/total[l])*100 : 0
 
               avg_sla = (avg <= 1000) ? "PASS" : "FAIL"
               p90_sla = (p90 <= 3000) ? "PASS" : "FAIL"
               overall = (avg_sla=="PASS" && p90_sla=="PASS") ? "PASS" : "FAIL"
 
-              avg_color = (avg_sla=="PASS") ? "#c6efce" : "#ffc7ce"
-              p90_color = (p90_sla=="PASS") ? "#c6efce" : "#ffc7ce"
-              overall_color = (overall=="PASS") ? "#c6efce" : "#ffc7ce"
+              avg_macro = (avg_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+
+              p90_macro = (p90_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+
+              overall_macro = (overall=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
 
               printf "<tr>"
               printf "<td>%s</td>", l
@@ -185,9 +184,9 @@ jobs:
               printf "<td>%d</td>", p90
               printf "<td>%d</td>", p95
               printf "<td>%.2f</td>", err
-              printf "<td style=\"background-color:%s\"><b>%s</b></td>", avg_color, avg_sla
-              printf "<td style=\"background-color:%s\"><b>%s</b></td>", p90_color, p90_sla
-              printf "<td style=\"background-color:%s\"><b>%s</b></td>", overall_color, overall
+              printf "<td>%s</td>", avg_macro
+              printf "<td>%s</td>", p90_macro
+              printf "<td>%s</td>", overall_macro
               printf "</tr>\n"
             }
           }' results.jtl >> agg.html
@@ -195,7 +194,7 @@ jobs:
           echo "</table>" >> agg.html
 
       # -------------------------
-      # Publish to Confluence (SAFE)
+      # Publish to Confluence
       # -------------------------
       - name: Publish to Confluence
         run: |
@@ -210,11 +209,8 @@ jobs:
           <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
           </table>
 
-          <h2>📈 Transaction-Level Aggregate (SLA Enabled)</h2>
+          <h2>📈 Transaction-Level Aggregate</h2>
           $(cat agg.html)
-
-          <h2>📊 JMeter HTML Report</h2>
-          <p>Attached separately (zip file)</p>
 
           <h2>🎭 Playwright Summary</h2>
           <table border='1'>
@@ -222,13 +218,9 @@ jobs:
           <tr><td>$(cat pw_passed.txt)</td><td>$(cat pw_failed.txt)</td></tr>
           </table>
 
-          <h2>📝 Observations</h2>
-          <p><i>Add observations, bottlenecks, and recommendations here.</i></p>
-
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          # Build JSON safely using jq (NO manual escaping)
           JSON_BODY=$(jq -n \
             --arg title "Performance Report - $(date +"%Y-%m-%d %H:%M:%S")" \
             --arg content "$CONTENT" \
@@ -247,38 +239,9 @@ jobs:
           RESPONSE=$(curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST \
             -H "Content-Type: application/json" \
-            -H "Accept: application/json" \
             -d "$JSON_BODY" \
             "$CONFLUENCE_BASE_URL/rest/api/content/")
 
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
-          if [ "$PAGE_ID" == "null" ] || [ -z "$PAGE_ID" ]; then
-            echo "Failed to create Confluence page"
-            echo "$RESPONSE"
-            exit 1
-          fi
-
           echo "Page ID: $PAGE_ID"
-
-          # Attach JTL
-          curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-            -X POST -H "X-Atlassian-Token: no-check" \
-            -F "file=@results.jtl;filename=jmeter-results.jtl" \
-            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
-
-          # Attach JMeter report
-          zip -r jmeter-report.zip jmeter-report
-
-          curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-            -X POST -H "X-Atlassian-Token: no-check" \
-            -F "file=@jmeter-report.zip;filename=jmeter-report.zip" \
-            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
-
-          # Attach Playwright results
-          for f in pw-results/*.json; do
-            curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-              -X POST -H "X-Atlassian-Token: no-check" \
-              -F "file=@$f" \
-              "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
-          done
