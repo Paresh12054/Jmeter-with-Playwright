@@ -1,4 +1,4 @@
-name: JMeter + Confluence + SLA
+name: Final Integration
 
 on:
   workflow_dispatch:
