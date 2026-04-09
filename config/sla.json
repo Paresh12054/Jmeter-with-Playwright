@@ -1,5 +1,5 @@
 {
-  "avg_ms": 1000,
-  "p90_ms": 3000,
+  "avg_ms": 500,
+  "p90_ms": 1000,
   "error_percent": 1
 }
