@@ -7,6 +7,12 @@ jobs:
   performance-and-ui:
     runs-on: ubuntu-latest
 
+    env:
+      CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+      CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+      CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+      CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -14,7 +20,7 @@ jobs:
       # Install tools
       # -------------------------
       - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq zip
 
       - uses: actions/setup-node@v4
         with:
@@ -38,7 +44,6 @@ jobs:
       - name: Start JMeter
         run: |
           date +"%Y-%m-%d %H:%M:%S" > jm_start.txt
-
           nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
           echo $! > jmeter.pid
 
@@ -48,7 +53,6 @@ jobs:
       - name: Run Playwright periodically
         run: |
           mkdir -p pw-results
-
           date +"%Y-%m-%d %H:%M:%S" > pw_start.txt
 
           END=$((SECONDS+600))
@@ -74,7 +78,6 @@ jobs:
           done
 
           date +"%Y-%m-%d %H:%M:%S" > pw_end.txt
-
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
 
@@ -94,7 +97,7 @@ jobs:
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
       # -------------------------
-      # Aggregate + SLA
+      # Aggregate Table (ONLY macros updated)
       # -------------------------
       - name: Generate Aggregate Table
         run: |
@@ -114,48 +117,75 @@ jobs:
 
           awk -F',' '
           NR>1 {
+
             label=$3
-            success=$8
+            success=tolower($8)
+
+            gsub(/\r/,"",success)
+            gsub(/^[ \t"]+|[ \t"]+$/, "", success)
 
             if (label ~ /^PT[0-9]+_/) {
 
               total[label]++
               sum[label]+=$2
 
-              if(success!="true") fail[label]++
+              if (success == "false" || success == "0") {
+                fail[label]++
+              }
 
               times[label]=times[label] " " $2
             }
           }
           END {
             for (l in total) {
+
               n=split(times[l], arr, " ")
+
+              idx=0
+              for(i=1;i<=n;i++){
+                if(arr[i]!=""){
+                  clean[++idx]=arr[i]
+                }
+              }
+              n=idx
 
               for(i=1;i<=n;i++){
                 for(j=i+1;j<=n;j++){
-                  if(arr[i]>arr[j]){
-                    tmp=arr[i]; arr[i]=arr[j]; arr[j]=tmp
+                  if(clean[i]>clean[j]){
+                    tmp=clean[i]; clean[i]=clean[j]; clean[j]=tmp
                   }
                 }
               }
 
-              p90=arr[int(n*0.9)]
-              p95=arr[int(n*0.95)]
-              avg=int(sum[l]/total[l])
-              err=(fail[l]/total[l])*100
+              p90_index = int((n*90 + 99)/100)
+              p95_index = int((n*95 + 99)/100)
+
+              p90 = clean[p90_index]
+              p95 = clean[p95_index]
+
+              avg = int(sum[l]/total[l])
+
+              err = (total[l] > 0) ? (fail[l]/total[l])*100 : 0
 
               avg_sla = (avg <= 1000) ? "PASS" : "FAIL"
               p90_sla = (p90 <= 3000) ? "PASS" : "FAIL"
+              overall = (avg_sla=="PASS" && p90_sla=="PASS") ? "PASS" : "FAIL"
 
-              if (avg_sla=="PASS" && p90_sla=="PASS") {
-                overall="PASS"
-                color="#c6efce"
-              } else {
-                overall="FAIL"
-                color="#ffc7ce"
-              }
+              printf "<tr>"
+              printf "<td>%s</td>", l
+              printf "<td>%d</td>", total[l]
+              printf "<td>%d</td>", avg
+              printf "<td>%d</td>", p90
+              printf "<td>%d</td>", p95
+              printf "<td>%.2f</td>", err
 
-              printf "<tr style=\"background-color:%s\"><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%.2f</td><td>%s</td><td>%s</td><td><b>%s</b></td></tr>\n", color, l, total[l], avg, p90, p95, err, avg_sla, p90_sla, overall
+              printf "<td>%s</td>", (avg_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+
+              printf "<td>%s</td>", (p90_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+
+              printf "<td>%s</td>", (overall=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+
+              printf "</tr>\n"
             }
           }' results.jtl >> agg.html
 
@@ -166,73 +196,92 @@ jobs:
       # -------------------------
       - name: Publish to Confluence
         run: |
-          set -e
-
-          TS=$(date +"%Y-%m-%d %H:%M:%S")
-          AGG=$(cat agg.html)
-
           CONTENT="<h1>🚀 Performance & UI Test Report</h1>
 
           <h2>⏱ Execution Timeline</h2>
           <table border='1'>
           <tr><th>Type</th><th>Start</th><th>End</th></tr>
-          <tr><td>JMeter</td><td>$(cat jm_start.txt)</td><td>$(cat jm_end.txt)</td></tr>
-          <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
+          <tr>
+            <td>JMeter</td>
+            <td>$(cat jm_start.txt)</td>
+            <td>$(cat jm_end.txt)</td>
+            </tr>
+            <tr>
+            <td>Playwright</td>
+            <td>$(cat pw_start.txt)</td>
+            <td>$(cat pw_end.txt)</td>
+          </tr>
           </table>
 
           <h2>📈 Transaction-Level Aggregate (SLA Enabled)</h2>
-          $AGG
+          $(cat agg.html)
 
           <h2>📊 JMeter HTML Report</h2>
-          <p>Download full report from attachments (jmeter-report.zip)</p>
+          <p>Attached separately (zip file)</p>
 
           <h2>🎭 Playwright Summary</h2>
           <table border='1'>
           <tr><th>Passed</th><th>Failed</th></tr>
-          <tr><td>$(cat pw_passed.txt)</td><td>$(cat pw_failed.txt)</td></tr>
+          <tr>
+            <td>$(cat pw_passed.txt)</td>
+            <td>$(cat pw_failed.txt)</td>
+          </tr>
           </table>
 
           <h2>📝 Observations</h2>
-          <p><i>👉 Add your observations, bottlenecks, performance issues, and recommendations here manually.</i></p>
+          <p><i>Add observations, bottlenecks, and recommendations here.</i></p>
 
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          ESCAPED=$(printf '%s' "$CONTENT" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g')
+          JSON=$(jq -n \
+          --arg title "Performance Report - $(date +"%Y-%m-%d %H:%M:%S")" \
+          --arg content "$CONTENT" \
+          '{
+            type: "page",
+            title: $title,
+            space: { key: env.CONFLUENCE_SPACE_KEY },
+            body: {
+              storage: {
+                value: $content,
+                representation: "storage"
+            }
+          }
+          }')
 
-          RESPONSE=$(curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            RESPONSE=$(curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST \
             -H "Content-Type: application/json" \
-            -d "{
-              \"type\": \"page\",
-              \"title\": \"Performance Report - $TS\",
-              \"space\": {\"key\": \"${{ secrets.CONFLUENCE_SPACE_KEY }}\"},
-              \"body\": {\"storage\": {\"value\": \"$ESCAPED\",\"representation\": \"storage\"}}
-            }" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/")
+            -d "$JSON" \
+            "$CONFLUENCE_BASE_URL/rest/api/content")
 
-          PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
+            PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
-          echo "Page ID: $PAGE_ID"
+            echo "PAGE_ID=$PAGE_ID" >> $GITHUB_ENV
+            echo "Created Page: $PAGE_ID"
 
-          # Attach JMeter raw
-          curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+      # -------------------------
+      # Upload Attachments (FIXED)
+      # -------------------------
+      - name: Upload Attachments
+        run: |
+          echo "Uploading to Page: $PAGE_ID"
+
+          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach HTML report
           zip -r jmeter-report.zip jmeter-report
 
-          curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@jmeter-report.zip" \
-            "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
 
-          # Attach Playwright
           for f in pw-results/*.json; do
-            curl -s -u "${{ secrets.CONFLUENCE_EMAIL }}:${{ secrets.CONFLUENCE_API_TOKEN }}" \
+            curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
               -X POST -H "X-Atlassian-Token: no-check" \
               -F "file=@$f" \
-              "${{ secrets.CONFLUENCE_BASE_URL }}/rest/api/content/$PAGE_ID/child/attachment"
+              "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
           done
