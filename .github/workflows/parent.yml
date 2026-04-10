@@ -1,0 +1,107 @@
+name: Confluence Automation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  confluence-job:
+    runs-on: ubuntu-latest
+
+    env:
+      CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+      CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+      CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+      CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+      PARENT_PAGE_ID: ${{ secrets.PARENT_PAGE_ID }}
+
+    steps:
+      - name: Run Confluence Script
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const baseUrl = process.env.CONFLUENCE_BASE_URL;
+            const email = process.env.CONFLUENCE_EMAIL;
+            const token = process.env.CONFLUENCE_API_TOKEN;
+            const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
+            const parentId = process.env.PARENT_PAGE_ID;
+
+            const auth = Buffer.from(`${email}:${token}`).toString("base64");
+
+            const headers = {
+              "Authorization": `Basic ${auth}`,
+              "Content-Type": "application/json"
+            };
+
+            const now = new Date().toISOString();
+
+            // 1️⃣ CREATE CHILD PAGE
+            const createRes = await fetch(`${baseUrl}/rest/api/content`, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                type: "page",
+                title: `Test Page ${now}`,
+                ancestors: [{ id: parentId }],
+                space: { key: spaceKey },
+                body: {
+                  storage: {
+                    value: `<p>Test</p><p>Created at ${now}</p>`,
+                    representation: "storage"
+                  }
+                }
+              })
+            });
+
+            if (!createRes.ok) {
+              throw new Error(`Create page failed: ${await createRes.text()}`);
+            }
+
+            const childPage = await createRes.json();
+
+            const childLink = baseUrl.replace("/wiki", "") + childPage._links.webui;
+
+            console.log("Child created:", childLink);
+
+            // 2️⃣ GET PARENT PAGE
+            const parentRes = await fetch(
+              `${baseUrl}/rest/api/content/${parentId}?expand=body.storage,version`,
+              { headers }
+            );
+
+            if (!parentRes.ok) {
+              throw new Error(`Get parent failed: ${await parentRes.text()}`);
+            }
+
+            const parentPage = await parentRes.json();
+
+            const currentVersion = parentPage.version.number;
+            const currentContent = parentPage.body.storage.value;
+
+            // 3️⃣ UPDATE PARENT PAGE
+            const updatedContent = currentContent + `
+              <p>Child page created at ${now}:
+              <a href="${childLink}">View Page</a></p>
+            `;
+
+            const updateRes = await fetch(`${baseUrl}/rest/api/content/${parentId}`, {
+              method: "PUT",
+              headers,
+              body: JSON.stringify({
+                id: parentId,
+                type: "page",
+                title: parentPage.title,
+                version: { number: currentVersion + 1 },
+                body: {
+                  storage: {
+                    value: updatedContent,
+                    representation: "storage"
+                  }
+                }
+              })
+            });
+
+            if (!updateRes.ok) {
+              throw new Error(`Update failed: ${await updateRes.text()}`);
+            }
+
+            console.log("✅ Parent updated successfully");
