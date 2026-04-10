@@ -104,11 +104,11 @@ jobs:
       # 🔐 ADDED: OWASP ZAP (fixed with volume mount + JSON)
       - name: Run OWASP ZAP Baseline Scan
         run: |
-          docker run --rm -v $(pwd):/zap/wrk/:rw -t owasp/zap2docker-stable zap-baseline.py \
-            -t https://xqa.io/practice/text-box \
-            -r zap-report.html \
-            -J zap-report.json \
-            -I || true
+          docker run --rm -v $(pwd):/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+          -t https://YOUR_REAL_APP_URL \
+          -r zap-report.html \
+          -J zap-report.json \
+          -I || true
 
           ls -l zap-report.*
 
