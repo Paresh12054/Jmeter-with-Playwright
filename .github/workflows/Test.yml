@@ -124,7 +124,7 @@ jobs:
 
           # ✅ Aggregate (group by time window - 10 seconds)
           df.set_index('timeStamp', inplace=True)
-          agg = df['elapsed'].resample('10S').mean()
+          agg = df['elapsed'].resample('10s').mean()
 
           # Plot
           plt.figure()
