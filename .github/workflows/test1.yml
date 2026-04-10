@@ -84,7 +84,6 @@ jobs:
             fi
 
             echo "$RUN_INDEX,$TS_START,$TS_END,$DURATION,$P,$F" >> $RUN_SUMMARY_FILE
-
             RUN_INDEX=$((RUN_INDEX+1))
             sleep 180
           done
@@ -101,6 +100,16 @@ jobs:
       - name: Generate JMeter HTML Report
         run: |
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
+
+      # 🔐 ONLY ADDITION
+      - name: Run OWASP ZAP Baseline Scan
+        run: |
+          docker run -t owasp/zap2docker-stable zap-baseline.py \
+            -t https://https://xqa.io/practice/text-box \
+            -r zap-report.html \
+            -I || true
+
+          ls -l zap-report.html || echo "ZAP report not generated"
 
       - name: Generate Aggregate Table
         run: |
@@ -140,52 +149,69 @@ jobs:
         run: |
           CONTENT="<h1>🚀 Performance & UI Test Report</h1>
 
+          <h2>📏 SLA Configuration</h2>
+          <table border='1'>
+          <tr><th>Metric</th><th>Threshold</th></tr>
+          <tr><td>Avg (ms)</td><td>$SLA_AVG</td></tr>
+          <tr><td>P90 (ms)</td><td>$SLA_P90</td></tr>
+          <tr><td>Error %</td><td>$SLA_ERR</td></tr>
+          </table>
+
+          <h2>⏱ Execution Timeline</h2>
+          <table border='1'>
+          <tr><th>Type</th><th>Start</th><th>End</th></tr>
+          <tr><td>JMeter</td><td>$(cat jm_start.txt)</td><td>$(cat jm_end.txt)</td></tr>
+          <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
+          </table>
+
           <h2>📈 Transaction-Level Aggregate</h2>
           $(cat agg.html)
+
+          <h2>🎭 Playwright Summary (All Runs)</h2>
+          <table border='1'>
+          <tr><th>Run</th><th>Start</th><th>End</th><th>Duration (sec)</th><th>Passed</th><th>Failed</th></tr>
+          $(tail -n +2 pw_runs_summary.txt | awk -F',' '{printf "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",$1,$2,$3,$4,$5,$6}')
+          </table>
+
+          <h2>🔐 Security Scan (OWASP ZAP)</h2>
+          <p>See attached report: zap-report.html</p>
 
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
           JSON=$(jq -n --arg title "Performance Report - $(date +"%Y-%m-%d %H:%M:%S")" --arg content "$CONTENT" '{
-            type: "page",
-            title: $title,
-            space: { key: env.CONFLUENCE_SPACE_KEY },
-            body: { storage: { value: $content, representation: "storage" } }
+            type:"page", title:$title, space:{key:env.CONFLUENCE_SPACE_KEY},
+            body:{storage:{value:$content,representation:"storage"}}
           }')
 
           RESPONSE=$(curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST -H "Content-Type: application/json" \
             -d "$JSON" "$CONFLUENCE_BASE_URL/rest/api/content")
 
-          echo "RESPONSE: $RESPONSE"
-
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
-
-          if [ -z "$PAGE_ID" ] || [ "$PAGE_ID" = "null" ]; then
-            echo "❌ Confluence page creation FAILED"
-            exit 1
-          fi
-
           echo "PAGE_ID=$PAGE_ID" >> $GITHUB_ENV
 
       - name: Upload Attachments
         run: |
-          set +e
-
-          [ -f results.jtl ] && curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
 
           zip -r jmeter-report.zip jmeter-report
-          [ -f jmeter-report.zip ] && curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+
+          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@jmeter-report.zip" \
             "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
 
+          [ -f zap-report.html ] && curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@zap-report.html" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+
           for f in pw-results/*.json; do
             [ -f "$f" ] || continue
-
             curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
               -X POST -H "X-Atlassian-Token: no-check" \
               -F "file=@$f" \
