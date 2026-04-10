@@ -146,7 +146,7 @@ jobs:
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
 
-          JSON=$(jq -n --arg title "Performance Report" --arg content "$CONTENT" '{
+          JSON=$(jq -n --arg title "Performance Report - $(date +"%Y-%m-%d %H:%M:%S")" --arg content "$CONTENT" '{
             type: "page",
             title: $title,
             space: { key: env.CONFLUENCE_SPACE_KEY },
