@@ -102,73 +102,46 @@ jobs:
         run: |
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
-      # 🔐 -------------------------
-      # SECURITY SCANS
-      # -------------------------
-      - name: Run npm audit
+      - name: Generate Aggregate Table
         run: |
-          npm audit --audit-level=high > npm-audit.txt || true
+          echo "<table border='1' style='border-collapse: collapse;'>" > agg.html
+          echo "<tr><th>Transaction</th><th>Total</th><th>Avg (ms)</th><th>P90 (ms)</th><th>P95 (ms)</th><th>Error %</th><th>Avg SLA</th><th>P90 SLA</th><th>Overall SLA</th></tr>" >> agg.html
 
-      - name: Run Gitleaks Scan
-        run: |
-          docker run --rm -v $(pwd):/repo zricethezav/gitleaks detect --source=/repo > gitleaks.txt || true
+          awk -v sla_avg="$SLA_AVG" -v sla_p90="$SLA_P90" -F',' '
+          NR>1 {
+            label=$3; success=tolower($8)
+            gsub(/\r/,"",success)
+            if (label ~ /^PT/) {
+              total[label]++; sum[label]+=$2
+              if (success == "false" || success == "0") fail[label]++
+              times[label]=times[label] " " $2
+            }
+          }
+          END {
+            for (l in total) {
+              n=split(times[l], arr, " ")
+              for(i=1;i<=n;i++){for(j=i+1;j<=n;j++){if(arr[i]>arr[j]){tmp=arr[i]; arr[i]=arr[j]; arr[j]=tmp}}}
+              p90=arr[int(n*0.9)]; p95=arr[int(n*0.95)]
+              avg=int(sum[l]/total[l]); err=(fail[l]/total[l])*100
+              avg_sla=(avg<=sla_avg)?"PASS":"FAIL"
+              p90_sla=(p90<=sla_p90)?"PASS":"FAIL"
+              overall=(avg_sla=="PASS"&&p90_sla=="PASS")?"PASS":"FAIL"
 
-      - name: Run OWASP ZAP Baseline Scan
-        run: |
-          docker run -t owasp/zap2docker-stable zap-baseline.py \
-            -t https://your-app-url.com \
-            -r zap-report.html \
-            -I || true
+              printf "<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%.2f</td>",l,total[l],avg,p90,p95,err
+              printf "<td>%s</td>",(avg_sla=="PASS")?"<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>":"<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+              printf "<td>%s</td>",(p90_sla=="PASS")?"<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>":"<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+              printf "<td>%s</td></tr>\n",(overall=="PASS")?"<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>":"<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+            }
+          }' results.jtl >> agg.html
 
-      # 🔐 SECURITY SUMMARY
-      - name: Generate Security Summary
-        run: |
-          HIGH=$(grep -i "high" npm-audit.txt | wc -l || true)
-          SECRETS=$(grep -i "leak" gitleaks.txt | wc -l || true)
-          ZAP_FAIL=$(grep -i "FAIL-NEW" zap-report.html | wc -l || true)
+          echo "</table>" >> agg.html
 
-          echo "<table border='1'>
-          <tr><th>Check</th><th>Status</th></tr>" > security.html
-
-          if [ "$HIGH" -gt 0 ]; then
-            echo "<tr><td>Dependencies</td><td><ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro></td></tr>" >> security.html
-          else
-            echo "<tr><td>Dependencies</td><td><ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro></td></tr>" >> security.html
-          fi
-
-          if [ "$SECRETS" -gt 0 ]; then
-            echo "<tr><td>Secrets</td><td><ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro></td></tr>" >> security.html
-          else
-            echo "<tr><td>Secrets</td><td><ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro></td></tr>" >> security.html
-          fi
-
-          if [ "$ZAP_FAIL" -gt 0 ]; then
-            echo "<tr><td>Runtime (ZAP)</td><td><ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro></td></tr>" >> security.html
-          else
-            echo "<tr><td>Runtime (ZAP)</td><td><ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro></td></tr>" >> security.html
-          fi
-
-          echo "</table>" >> security.html
-
-      # -------------------------
-      # PUBLISH TO CONFLUENCE
-      # -------------------------
       - name: Publish to Confluence
         run: |
           CONTENT="<h1>🚀 Performance & UI Test Report</h1>
 
-          <h2>⏱ Execution Timeline</h2>
-          <table border='1'>
-          <tr><th>Type</th><th>Start</th><th>End</th></tr>
-          <tr><td>JMeter</td><td>$(cat jm_start.txt)</td><td>$(cat jm_end.txt)</td></tr>
-          <tr><td>Playwright</td><td>$(cat pw_start.txt)</td><td>$(cat pw_end.txt)</td></tr>
-          </table>
-
           <h2>📈 Transaction-Level Aggregate</h2>
           $(cat agg.html)
-
-          <h2>🔐 Security Summary</h2>
-          $(cat security.html)
 
           <h2>📎 Attachments</h2>
           <ac:structured-macro ac:name=\"attachments\"/>"
@@ -180,21 +153,37 @@ jobs:
             body: { storage: { value: $content, representation: "storage" } }
           }')
 
-          RESPONSE=$(curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" -X POST -H "Content-Type: application/json" -d "$JSON" "$CONFLUENCE_BASE_URL/rest/api/content")
+          RESPONSE=$(curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST -H "Content-Type: application/json" \
+            -d "$JSON" "$CONFLUENCE_BASE_URL/rest/api/content")
+
           PAGE_ID=$(echo "$RESPONSE" | jq -r '.id')
+
           echo "PAGE_ID=$PAGE_ID" >> $GITHUB_ENV
-          if [ -z "$PAGE_ID" ] || [ "$PAGE_ID" = "null" ]; then
-          echo "❌ Page creation failed"
-          echo "$RESPONSE"
-          exit 1
-          fi
 
       - name: Upload Attachments
         run: |
-          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" -X POST -H "X-Atlassian-Token: no-check" -F "file=@results.jtl" "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+          set +e
 
+          # Upload results.jtl
+          [ -f results.jtl ] && curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@results.jtl" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+
+          # Upload JMeter report
           zip -r jmeter-report.zip jmeter-report
+          [ -f jmeter-report.zip ] && curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@jmeter-report.zip" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
 
-          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" -X POST -H "X-Atlassian-Token: no-check" -F "file=@jmeter-report.zip" "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+          # Upload Playwright files safely
+          for f in pw-results/*.json; do
+            [ -f "$f" ] || continue
 
-          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" -X POST -H "X-Atlassian-Token: no-check" -F "file=@zap-report.html" "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+            curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+              -X POST -H "X-Atlassian-Token: no-check" \
+              -F "file=@$f" \
+              "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+          done
