@@ -132,17 +132,7 @@ jobs:
             } else {
               console.log("⚠️ Table not found — creating new one");
 
-              content += `
-                <h2>Child Pages Log</h2>
-                <table>
-                  <tr>
-                    <th>Created At</th>
-                    <th>Page</th>
-                  </tr>
-                  ${newRow}
-                </table>
-              `;
-            }
+              }
 
             // ✅ STEP 6: UPDATE INDEX PAGE
             await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
