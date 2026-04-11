@@ -1,4 +1,4 @@
-name: Confluence Automation
+name: Confluence Folder Automation
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ jobs:
       CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
       CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
       CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
-      PARENT_PAGE_ID: ${{ secrets.PARENT_PAGE_ID }}
+      FOLDER_ID: "5144580"
 
     steps:
       - name: Run Confluence Script
@@ -23,7 +23,7 @@ jobs:
             const email = process.env.CONFLUENCE_EMAIL;
             const token = process.env.CONFLUENCE_API_TOKEN;
             const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
-            const parentId = process.env.PARENT_PAGE_ID;
+            const folderId = process.env.FOLDER_ID;
 
             const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
@@ -34,74 +34,107 @@ jobs:
 
             const now = new Date().toISOString();
 
-            // 1️⃣ CREATE CHILD PAGE
-            const createRes = await fetch(`${baseUrl}/rest/api/content`, {
-              method: "POST",
-              headers,
-              body: JSON.stringify({
-                type: "page",
-                title: `Test Page ${now}`,
-                ancestors: [{ id: parentId }],
-                space: { key: spaceKey },
-                body: {
-                  storage: {
-                    value: `<p>Test</p><p>Created at ${now}</p>`,
-                    representation: "storage"
-                  }
-                }
-              })
-            });
+            // 🔹 Helper function
+            async function api(url, method = "GET", body = null) {
+              const res = await fetch(url, {
+                method,
+                headers,
+                body: body ? JSON.stringify(body) : null
+              });
 
-            if (!createRes.ok) {
-              throw new Error(`Create page failed: ${await createRes.text()}`);
+              if (!res.ok) {
+                throw new Error(`${method} ${url} failed: ${await res.text()}`);
+              }
+
+              return res.json();
             }
 
-            const childPage = await createRes.json();
+            // 1️⃣ CREATE CHILD PAGE UNDER FOLDER
+            const childPage = await api(`${baseUrl}/rest/api/content`, "POST", {
+              type: "page",
+              title: `Test Page ${now}`,
+              ancestors: [{ id: folderId }],
+              space: { key: spaceKey },
+              body: {
+                storage: {
+                  value: `<p>Test</p><p>Created at ${now}</p>`,
+                  representation: "storage"
+                }
+              }
+            });
 
             const childLink = baseUrl.replace("/wiki", "") + childPage._links.webui;
 
-            console.log("Child created:", childLink);
+            console.log("✅ Child page created:", childLink);
 
-            // 2️⃣ GET PARENT PAGE
-            const parentRes = await fetch(
-              `${baseUrl}/rest/api/content/${parentId}?expand=body.storage,version`,
-              { headers }
+            // 2️⃣ FIND EXISTING INDEX PAGE
+            const searchRes = await api(
+              `${baseUrl}/rest/api/content?title=Index Page&spaceKey=${spaceKey}&expand=version,body.storage`
             );
 
-            if (!parentRes.ok) {
-              throw new Error(`Get parent failed: ${await parentRes.text()}`);
-            }
+            let indexPage = searchRes.results.find(p => 
+              p.ancestors?.some(a => a.id === folderId)
+            );
 
-            const parentPage = await parentRes.json();
+            // 3️⃣ CREATE INDEX PAGE IF NOT EXISTS
+            if (!indexPage) {
+              console.log("📄 Creating Index Page...");
 
-            const currentVersion = parentPage.version.number;
-            const currentContent = parentPage.body.storage.value;
-
-            // 3️⃣ UPDATE PARENT PAGE
-            const updatedContent = currentContent + `
-              <p>Child page created at ${now}:
-              <a href="${childLink}">View Page</a></p>
-            `;
-
-            const updateRes = await fetch(`${baseUrl}/rest/api/content/${parentId}`, {
-              method: "PUT",
-              headers,
-              body: JSON.stringify({
-                id: parentId,
+              indexPage = await api(`${baseUrl}/rest/api/content`, "POST", {
                 type: "page",
-                title: parentPage.title,
-                version: { number: currentVersion + 1 },
+                title: "Index Page",
+                ancestors: [{ id: folderId }],
+                space: { key: spaceKey },
                 body: {
                   storage: {
-                    value: updatedContent,
+                    value: `
+                      <h2>Child Pages Log</h2>
+                      <table>
+                        <tr>
+                          <th>Created At</th>
+                          <th>Page</th>
+                        </tr>
+                      </table>
+                    `,
                     representation: "storage"
                   }
                 }
-              })
-            });
-
-            if (!updateRes.ok) {
-              throw new Error(`Update failed: ${await updateRes.text()}`);
+              });
             }
 
-            console.log("✅ Parent updated successfully");
+            // If newly created, fetch full details
+            if (!indexPage.body) {
+              indexPage = await api(
+                `${baseUrl}/rest/api/content/${indexPage.id}?expand=body.storage,version`
+              );
+            }
+
+            const currentVersion = indexPage.version.number;
+            let content = indexPage.body.storage.value;
+
+            // 4️⃣ APPEND ROW TO TABLE
+            const newRow = `
+              <tr>
+                <td>${now}</td>
+                <td><a href="${childLink}">View</a></td>
+              </tr>
+            `;
+
+            // insert row before </table>
+            content = content.replace("</table>", `${newRow}</table>`);
+
+            // 5️⃣ UPDATE INDEX PAGE
+            await api(`${baseUrl}/rest/api/content/${indexPage.id}`, "PUT", {
+              id: indexPage.id,
+              type: "page",
+              title: indexPage.title,
+              version: { number: currentVersion + 1 },
+              body: {
+                storage: {
+                  value: content,
+                  representation: "storage"
+                }
+              }
+            });
+
+            console.log("✅ Index page updated successfully");
