@@ -33,8 +33,9 @@ jobs:
             };
 
             const now = new Date().toISOString();
+            const pageTitle = `Test Page ${now}`;
 
-            // 🔹 Helper function
+            // 🔹 API helper
             async function api(url, method = "GET", body = null) {
               const res = await fetch(url, {
                 method,
@@ -49,10 +50,10 @@ jobs:
               return res.json();
             }
 
-            // 1️⃣ CREATE CHILD PAGE UNDER FOLDER
+            // 1️⃣ CREATE CHILD PAGE
             const childPage = await api(`${baseUrl}/rest/api/content`, "POST", {
               type: "page",
-              title: `Test Page ${now}`,
+              title: pageTitle,
               ancestors: [{ id: folderId }],
               space: { key: spaceKey },
               body: {
@@ -67,7 +68,7 @@ jobs:
 
             console.log("✅ Child page created:", childLink);
 
-            // 2️⃣ FIND EXISTING INDEX PAGE
+            // 2️⃣ FIND INDEX PAGE
             const searchRes = await api(
               `${baseUrl}/rest/api/content?title=Index Page&spaceKey=${spaceKey}&expand=version,body.storage`
             );
@@ -102,32 +103,54 @@ jobs:
               });
             }
 
-            // If newly created, fetch full details
-            if (!indexPage.body) {
-              indexPage = await api(
-                `${baseUrl}/rest/api/content/${indexPage.id}?expand=body.storage,version`
-              );
+            // 4️⃣ ALWAYS FETCH LATEST VERSION (IMPORTANT FIX)
+            const latest = await api(
+              `${baseUrl}/rest/api/content/${indexPage.id}?expand=body.storage,version`
+            );
+
+            let content = latest.body.storage.value;
+            const currentVersion = latest.version.number;
+
+            // 5️⃣ PREVENT DUPLICATES
+            if (content.includes(childLink)) {
+              console.log("⚠️ Entry already exists, skipping update");
+              return;
             }
 
-            const currentVersion = indexPage.version.number;
-            let content = indexPage.body.storage.value;
-
-            // 4️⃣ APPEND ROW TO TABLE
+            // 6️⃣ CREATE NEW ROW (NEWEST ON TOP)
             const newRow = `
               <tr>
                 <td>${now}</td>
-                <td><a href="${childLink}">View</a></td>
+                <td><a href="${childLink}">${pageTitle}</a></td>
               </tr>
             `;
 
-            // insert row before </table>
-            content = content.replace("</table>", `${newRow}</table>`);
+            // 7️⃣ INSERT ROW SAFELY
+            if (content.match(/<\/table>/i)) {
+              // insert after header row (top of table)
+              content = content.replace(
+                /(<table[^>]*>\s*<tr>.*?<\/tr>)/is,
+                `$1${newRow}`
+              );
+            } else {
+              console.log("⚠️ Table missing, recreating...");
+              content += `
+                <h2>Child Pages Log</h2>
+                <table>
+                  <tr>
+                    <th>Created At</th>
+                    <th>Page</th>
+                  </tr>
+                  ${newRow}
+                </table>
+              `;
+            }
 
-            // 5️⃣ UPDATE INDEX PAGE
+            // 8️⃣ UPDATE INDEX PAGE
             await api(`${baseUrl}/rest/api/content/${indexPage.id}`, "PUT", {
               id: indexPage.id,
               type: "page",
-              title: indexPage.title,
+              title: latest.title,
               version: { number: currentVersion + 1 },
               body: {
                 storage: {
