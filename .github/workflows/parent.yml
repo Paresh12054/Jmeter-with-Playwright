@@ -106,11 +106,29 @@ jobs:
             `;
 
             // ✅ STEP 5: SAFE TABLE INSERT
-            if (content.match(/<\/table>/i)) {
-              content = content.replace(
-                /(<table[^>]*>\s*<tr>.*?<\/tr>)/is,
-                `$1${newRow}`
-              );
+            // 5️⃣ BULLETPROOF TABLE INSERT
+
+              if (content.includes("</tbody>")) {
+              // Most reliable case
+              content = content.replace("</tbody>", `${newRow}</tbody>`);
+            } else if (content.includes("</table>")) {
+            // fallback
+            content = content.replace("</table>", `${newRow}</table>`);
+            } else {
+            console.log("⚠️ No table found → creating new one");
+
+            content += `
+            <h2>Child Pages Log</h2>
+            <table>
+            <tbody>
+            <tr>
+            <th>Created At</th>
+            <th>Page</th>
+            </tr>
+            ${newRow}
+            </tbody>
+            </table>
+            `;
             } else {
               console.log("⚠️ Table not found — creating new one");
 
