@@ -34,7 +34,8 @@ jobs:
               "Content-Type": "application/json"
             };
 
-            const now = new Date().toISOString();
+            // ✅ Better formatted date
+            const now = new Date().toLocaleString("en-GB");
             const pageTitle = `Test Page ${now}`;
 
             async function api(url, method = "GET", body = null) {
@@ -71,21 +72,19 @@ jobs:
 
             console.log("✅ Child page created:", childLink);
 
-            // ✅ STEP 2: FETCH INDEX PAGE (STRICT)
+            // ✅ STEP 2: FETCH INDEX PAGE
             const indexPage = await api(
               `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
             );
 
             console.log("📄 Index page type:", indexPage.type);
 
-            // ❌ HARD FAIL if wrong type
             if (indexPage.type !== "page") {
-              throw new Error("❌ INDEX_PAGE_ID is NOT a page. You are likely using a folder ID.");
+              throw new Error("❌ INDEX_PAGE_ID is NOT a page.");
             }
 
-            // ❌ HARD FAIL if body missing
             if (!indexPage.body || !indexPage.body.storage) {
-              throw new Error("❌ Index page body missing. Check permissions or page ID.");
+              throw new Error("❌ Index page body missing.");
             }
 
             let content = indexPage.body.storage.value;
@@ -97,39 +96,52 @@ jobs:
               return;
             }
 
-            // ✅ STEP 4: CREATE ROW (NEWEST ON TOP)
+            // ✅ STEP 4: NEW ROW (Styled + Status)
             const newRow = `
-              <tr>
+              <tr style="background-color:#E3FCEF;">
                 <td>${now}</td>
-                <td><a href="${childLink}">${pageTitle}</a></td>
+                <td><a href="${childLink}"><strong>${pageTitle}</strong></a></td>
+                <td>
+                  <ac:structured-macro ac:name="status">
+                    <ac:parameter ac:name="colour">Green</ac:parameter>
+                    <ac:parameter ac:name="title">SUCCESS</ac:parameter>
+                  </ac:structured-macro>
+                </td>
               </tr>
             `;
 
             // ✅ STEP 5: SAFE TABLE INSERT
-            // 5️⃣ BULLETPROOF TABLE INSERT
-
-              if (content.includes("</tbody>")) {
-              // Most reliable case
+            if (content.includes("</tbody>")) {
               content = content.replace("</tbody>", `${newRow}</tbody>`);
             } else if (content.includes("</table>")) {
-            // fallback
-            content = content.replace("</table>", `${newRow}</table>`);
+              content = content.replace("</table>", `${newRow}</table>`);
             } else {
-            console.log("⚠️ No table found → creating new one");
+              console.log("⚠️ No table found → creating dashboard");
 
-            content += `
-            <h2>Child Pages Log</h2>
-            <table>
-            <tbody>
-            <tr>
-            <th>Created At</th>
-            <th>Page</th>
-            </tr>
-            ${newRow}
-            </tbody>
-            </table>
-            `;
-            } 
+              content += `
+                <h1>📊 Automation Dashboard</h1>
+
+                <p><strong>Last Updated:</strong> ${now}</p>
+
+                <ac:structured-macro ac:name="panel">
+                  <ac:parameter ac:name="title">📄 Child Page Activity</ac:parameter>
+                  <ac:rich-text-body>
+
+                    <table>
+                      <tbody>
+                        <tr>
+                          <th>Created At</th>
+                          <th>Page</th>
+                          <th>Status</th>
+                        </tr>
+                        ${newRow}
+                      </tbody>
+                    </table>
+
+                  </ac:rich-text-body>
+                </ac:structured-macro>
+              `;
+            }
 
             // ✅ STEP 6: UPDATE INDEX PAGE
             await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
