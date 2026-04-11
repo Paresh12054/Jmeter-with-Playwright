@@ -13,6 +13,7 @@ jobs:
       CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
       CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
       FOLDER_ID: "5144580"
+      INDEX_PAGE_ID: ${{ secrets.INDEX_PAGE_ID }}  # 👈 ADD THIS
 
     steps:
       - name: Run Confluence Script
@@ -24,6 +25,7 @@ jobs:
             const token = process.env.CONFLUENCE_API_TOKEN;
             const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
             const folderId = process.env.FOLDER_ID;
+            const indexPageId = process.env.INDEX_PAGE_ID;
 
             const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
@@ -35,7 +37,6 @@ jobs:
             const now = new Date().toISOString();
             const pageTitle = `Test Page ${now}`;
 
-            // 🔹 API helper
             async function api(url, method = "GET", body = null) {
               const res = await fetch(url, {
                 method,
@@ -50,7 +51,7 @@ jobs:
               return res.json();
             }
 
-            // 1️⃣ CREATE CHILD PAGE
+            // 1️⃣ CREATE CHILD PAGE (UNDER FOLDER)
             const childPage = await api(`${baseUrl}/rest/api/content`, "POST", {
               type: "page",
               title: pageTitle,
@@ -68,56 +69,21 @@ jobs:
 
             console.log("✅ Child page created:", childLink);
 
-            // 2️⃣ FIND INDEX PAGE
-            const searchRes = await api(
-              `${baseUrl}/rest/api/content?title=Index Page&spaceKey=${spaceKey}&expand=version,body.storage`
+            // 2️⃣ FETCH INDEX PAGE (NO CREATION)
+            const indexPage = await api(
+              `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
             );
 
-            let indexPage = searchRes.results.find(p => 
-              p.ancestors?.some(a => a.id === folderId)
-            );
+            let content = indexPage.body.storage.value;
+            const currentVersion = indexPage.version.number;
 
-            // 3️⃣ CREATE INDEX PAGE IF NOT EXISTS
-            if (!indexPage) {
-              console.log("📄 Creating Index Page...");
-
-              indexPage = await api(`${baseUrl}/rest/api/content`, "POST", {
-                type: "page",
-                title: "Index Page",
-                ancestors: [{ id: folderId }],
-                space: { key: spaceKey },
-                body: {
-                  storage: {
-                    value: `
-                      <h2>Child Pages Log</h2>
-                      <table>
-                        <tr>
-                          <th>Created At</th>
-                          <th>Page</th>
-                        </tr>
-                      </table>
-                    `,
-                    representation: "storage"
-                  }
-                }
-              });
-            }
-
-            // 4️⃣ ALWAYS FETCH LATEST VERSION (IMPORTANT FIX)
-            const latest = await api(
-              `${baseUrl}/rest/api/content/${indexPage.id}?expand=body.storage,version`
-            );
-
-            let content = latest.body.storage.value;
-            const currentVersion = latest.version.number;
-
-            // 5️⃣ PREVENT DUPLICATES
+            // 3️⃣ PREVENT DUPLICATE
             if (content.includes(childLink)) {
               console.log("⚠️ Entry already exists, skipping update");
               return;
             }
 
-            // 6️⃣ CREATE NEW ROW (NEWEST ON TOP)
+            // 4️⃣ NEW ROW (TOP INSERT)
             const newRow = `
               <tr>
                 <td>${now}</td>
@@ -125,9 +91,8 @@ jobs:
               </tr>
             `;
 
-            // 7️⃣ INSERT ROW SAFELY
+            // 5️⃣ SAFE TABLE INSERT
             if (content.match(/<\/table>/i)) {
-              // insert after header row (top of table)
               content = content.replace(
                 /(<table[^>]*>\s*<tr>.*?<\/tr>)/is,
                 `$1${newRow}`
@@ -146,11 +111,11 @@ jobs:
               `;
             }
 
-            // 8️⃣ UPDATE INDEX PAGE
-            await api(`${baseUrl}/rest/api/content/${indexPage.id}`, "PUT", {
-              id: indexPage.id,
+            // 6️⃣ UPDATE INDEX PAGE
+            await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
+              id: indexPageId,
               type: "page",
-              title: latest.title,
+              title: indexPage.title,
               version: { number: currentVersion + 1 },
               body: {
                 storage: {
