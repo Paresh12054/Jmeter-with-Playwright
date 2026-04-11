@@ -129,10 +129,7 @@ jobs:
             </tbody>
             </table>
             `;
-            } else {
-              console.log("⚠️ Table not found — creating new one");
-
-              }
+            } 
 
             // ✅ STEP 6: UPDATE INDEX PAGE
             await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
