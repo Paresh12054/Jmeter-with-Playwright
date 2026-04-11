@@ -13,7 +13,7 @@ jobs:
       CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
       CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
       FOLDER_ID: "5144580"
-      INDEX_PAGE_ID: ${{ secrets.INDEX_PAGE_ID }}  # 👈 ADD THIS
+      INDEX_PAGE_ID: ${{ secrets.INDEX_PAGE_ID }}
 
     steps:
       - name: Run Confluence Script
@@ -44,14 +44,16 @@ jobs:
                 body: body ? JSON.stringify(body) : null
               });
 
+              const text = await res.text();
+
               if (!res.ok) {
-                throw new Error(`${method} ${url} failed: ${await res.text()}`);
+                throw new Error(`${method} ${url} failed:\n${text}`);
               }
 
-              return res.json();
+              return text ? JSON.parse(text) : {};
             }
 
-            // 1️⃣ CREATE CHILD PAGE (UNDER FOLDER)
+            // ✅ STEP 1: CREATE CHILD PAGE UNDER FOLDER
             const childPage = await api(`${baseUrl}/rest/api/content`, "POST", {
               type: "page",
               title: pageTitle,
@@ -69,21 +71,33 @@ jobs:
 
             console.log("✅ Child page created:", childLink);
 
-            // 2️⃣ FETCH INDEX PAGE (NO CREATION)
+            // ✅ STEP 2: FETCH INDEX PAGE (STRICT)
             const indexPage = await api(
               `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
             );
 
+            console.log("📄 Index page type:", indexPage.type);
+
+            // ❌ HARD FAIL if wrong type
+            if (indexPage.type !== "page") {
+              throw new Error("❌ INDEX_PAGE_ID is NOT a page. You are likely using a folder ID.");
+            }
+
+            // ❌ HARD FAIL if body missing
+            if (!indexPage.body || !indexPage.body.storage) {
+              throw new Error("❌ Index page body missing. Check permissions or page ID.");
+            }
+
             let content = indexPage.body.storage.value;
             const currentVersion = indexPage.version.number;
 
-            // 3️⃣ PREVENT DUPLICATE
+            // ✅ STEP 3: PREVENT DUPLICATE ENTRY
             if (content.includes(childLink)) {
               console.log("⚠️ Entry already exists, skipping update");
               return;
             }
 
-            // 4️⃣ NEW ROW (TOP INSERT)
+            // ✅ STEP 4: CREATE ROW (NEWEST ON TOP)
             const newRow = `
               <tr>
                 <td>${now}</td>
@@ -91,14 +105,15 @@ jobs:
               </tr>
             `;
 
-            // 5️⃣ SAFE TABLE INSERT
+            // ✅ STEP 5: SAFE TABLE INSERT
             if (content.match(/<\/table>/i)) {
               content = content.replace(
                 /(<table[^>]*>\s*<tr>.*?<\/tr>)/is,
                 `$1${newRow}`
               );
             } else {
-              console.log("⚠️ Table missing, recreating...");
+              console.log("⚠️ Table not found — creating new one");
+
               content += `
                 <h2>Child Pages Log</h2>
                 <table>
@@ -111,7 +126,7 @@ jobs:
               `;
             }
 
-            // 6️⃣ UPDATE INDEX PAGE
+            // ✅ STEP 6: UPDATE INDEX PAGE
             await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
               id: indexPageId,
               type: "page",
