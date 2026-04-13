@@ -156,27 +156,27 @@ jobs:
       - name: Publish to Confluence
         uses: actions/github-script@v7
         with:
-        script: |
-          const fs = require('fs');
+          script: |
+            const fs = require('fs');
 
-          const baseUrl = process.env.CONFLUENCE_BASE_URL;
-          const email = process.env.CONFLUENCE_EMAIL;
-          const token = process.env.CONFLUENCE_API_TOKEN;
-          const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
+            const baseUrl = process.env.CONFLUENCE_BASE_URL;
+            const email = process.env.CONFLUENCE_EMAIL;
+            const token = process.env.CONFLUENCE_API_TOKEN;
+            const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
 
-          const parentId = "6094858";
-          const indexPageId = "6094858";
+            const parentId = "6094858";
+            const indexPageId = "6094858";
 
-          const auth = Buffer.from(`${email}:${token}`).toString("base64");
+            const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
-          const headers = {
-          "Authorization": `Basic ${auth}`,
-          "Content-Type": "application/json"
-          };
+            const headers = {
+            "Authorization": `Basic ${auth}`,
+            "Content-Type": "application/json"
+            };
 
-          const now = new Date().toLocaleString("en-GB").replace(",", "");
+            const now = new Date().toLocaleString("en-GB").replace(",", "");
 
-          async function api(url, method = "GET", body = null) {
+            async function api(url, method = "GET", body = null) {
             const res = await fetch(url, {
               method,
               headers,
@@ -190,10 +190,10 @@ jobs:
             }
 
             return text ? JSON.parse(text) : {};
-          }
+            }
 
-          // ✅ FIXED PLAYWRIGHT TABLE (Node version)
-          const pwRows = fs.readFileSync('pw_runs_summary.txt')
+            // ✅ FIXED PLAYWRIGHT TABLE (Node version) 
+            const pwRows = fs.readFileSync('pw_runs_summary.txt')
             .toString()
             .split('\n')
             .slice(1)
@@ -203,45 +203,45 @@ jobs:
               return `<tr><td>${a}</td><td>${b}</td><td>${c}</td><td>${d}</td><td>${e}</td><td>${f}</td></tr>`;
             }).join('');
 
-          const zapSummary = fs.readFileSync('zap-summary.html').toString();
+            const zapSummary = fs.readFileSync('zap-summary.html').toString();
 
-          // ✅ FULL ORIGINAL CONTENT (FIXED ONLY)
-          const CONTENT = `<h1>🚀 Performance & UI Test Report</h1>
+            // ✅ FULL ORIGINAL CONTENT (FIXED ONLY)
+            const CONTENT = `<h1>🚀 Performance & UI Test Report</h1>
 
-          <h2>📏 SLA Configuration</h2>
-          <table border='1'>
-          <tr><th>Metric</th><th>Threshold</th></tr>
-          <tr><td>Avg (ms)</td><td>${process.env.SLA_AVG}</td></tr>
-          <tr><td>P90 (ms)</td><td>${process.env.SLA_P90}</td></tr>
-          <tr><td>Error %</td><td>${process.env.SLA_ERR}</td></tr>
-          </table>
+            <h2>📏 SLA Configuration</h2>
+            <table border='1'>
+            <tr><th>Metric</th><th>Threshold</th></tr>
+            <tr><td>Avg (ms)</td><td>${process.env.SLA_AVG}</td></tr>
+            <tr><td>P90 (ms)</td><td>${process.env.SLA_P90}</td></tr>
+            <tr><td>Error %</td><td>${process.env.SLA_ERR}</td></tr>
+            </table>
 
-          <h2>⏱ Execution Timeline</h2>
-          <table border='1'>
-          <tr><th>Type</th><th>Start</th><th>End</th></tr>
-          <tr><td>JMeter</td><td>${fs.readFileSync('jm_start.txt')}</td><td>${fs.readFileSync('jm_end.txt')}</td></tr>
-          <tr><td>Playwright</td><td>${fs.readFileSync('pw_start.txt')}</td><td>${fs.readFileSync('pw_end.txt')}</td></tr>
-          </table>
+            <h2>⏱ Execution Timeline</h2>
+            <table border='1'>
+            <tr><th>Type</th><th>Start</th><th>End</th></tr>
+            <tr><td>JMeter</td><td>${fs.readFileSync('jm_start.txt')}</td><td>${fs.readFileSync('jm_end.txt')}</td></tr>
+            <tr><td>Playwright</td><td>${fs.readFileSync('pw_start.txt')}</td><td>${fs.readFileSync('pw_end.txt')}</td></tr>
+            </table>
 
-          <h2>📈 Transaction-Level Aggregate</h2>
-          ${fs.readFileSync('agg.html')}
+            <h2>📈 Transaction-Level Aggregate</h2>
+            ${fs.readFileSync('agg.html')}
 
-          <h2>🎭 Playwright Summary (All Runs)</h2>
-          <table border='1'>
-          <tr><th>Run</th><th>Start</th><th>End</th><th>Duration (sec)</th><th>Passed</th><th>Failed</th></tr>
-          ${pwRows}
-          </table>
+            <h2>🎭 Playwright Summary (All Runs)</h2>
+            <table border='1'>
+            <tr><th>Run</th><th>Start</th><th>End</th><th>Duration (sec)</th><th>Passed</th><th>Failed</th></tr>
+            ${pwRows}
+            </table>
       
-          <h2>🔐 Security Scan (OWASP ZAP)</h2>
-          ${zapSummary}
-          <p>Detailed report attached: zap-report.html</p>
+            <h2>🔐 Security Scan (OWASP ZAP)</h2>
+            ${zapSummary}
+            <p>Detailed report attached: zap-report.html</p>
 
-          <h2>📎 Attachments</h2>
-          <ac:structured-macro ac:name="attachments"/>`;
+            <h2>📎 Attachments</h2>
+            <ac:structured-macro ac:name="attachments"/>`;
 
-          const pageTitle = `Performance Report - ${now}`;
+            const pageTitle = `Performance Report - ${now}`;
 
-          const childPage = await api(`${baseUrl}/rest/api/content`, "POST", {
+            const childPage = await api(`${baseUrl}/rest/api/content`, "POST", {
             type: "page",
             title: pageTitle,
             ancestors: [{ id: parentId }],
@@ -252,31 +252,31 @@ jobs:
                 representation: "storage"
               }
             }
-          });
+            });
 
-          const childLink = childPage._links.base + childPage._links.webui;
+            const childLink = childPage._links.base + childPage._links.webui;
 
-          const indexPage = await api(
+            const indexPage = await api(
             `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
-          );
+            );
 
-          let content = indexPage.body.storage.value;
-          const version = indexPage.version.number;
+            let content = indexPage.body.storage.value;
+            const version = indexPage.version.number;
 
-          const newRow = `
-            <tr>
+            const newRow = `
+              <tr>
               <td>${now}</td>
               <td><a href="${childLink}">${pageTitle}</a></td>
             </tr>
-          `;
+            `;
 
             if (content.includes("</tbody>")) {
             content = content.replace("</tbody>", `${newRow}</tbody>`);
-          } else if (content.includes("</table>")) {
+            } else if (content.includes("</table>")) {
             content = content.replace("</table>", `${newRow}</table>`);
-          }
+            }
 
-          await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
+            await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
             id: indexPageId,
             type: "page",
             title: indexPage.title,
@@ -287,9 +287,9 @@ jobs:
                 representation: "storage"
               }
             }
-          });
+            });
 
-          fs.appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${childPage.id}\n`);
+            fs.appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${childPage.id}\n`);
 
       - name: Upload Attachments
         run: |
