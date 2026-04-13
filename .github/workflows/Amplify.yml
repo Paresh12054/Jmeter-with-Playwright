@@ -18,7 +18,7 @@ jobs:
 
             curl -s -D headers.txt -o response.txt \
             -X GET "${AMPLIFY_BASE_URL}" \
-            -H "Authorization: Bearer ${AMPLIFY_API_KEY}"
+            -H "x-api-key: ${AMPLIFY_API_KEY}"
 
             STATUS=$(grep HTTP headers.txt | tail -1 | awk '{print $2}')
 
