@@ -85,7 +85,7 @@ jobs:
 
             echo "$RUN_INDEX,$TS_START,$TS_END,$DURATION,$P,$F" >> $RUN_SUMMARY_FILE
             RUN_INDEX=$((RUN_INDEX+1))
-            sleep 180
+            sleep 90
           done
 
           date +"%Y-%m-%d %H:%M:%S" > pw_end.txt
@@ -100,6 +100,50 @@ jobs:
       - name: Generate JMeter HTML Report
         run: |
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
+
+      # 🔐 ADDED: OWASP ZAP (fixed with volume mount + JSON)
+      - name: Run OWASP ZAP Baseline Scan
+        run: |
+          docker run --rm \
+          -u root \
+          -v $(pwd):/zap/wrk/:rw \
+          -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+          -t https://owasp.org/www-project-juice-shop/ \
+          -r zap-report.html \
+          -J zap-report.json \
+          -I || true
+          ls -l zap-report.*
+      # 🔐 ADDED: Security Summary
+      - name: Generate ZAP Summary
+        run: |
+          if [ -f zap-report.json ]; then
+            FAIL=$(jq '.site[].alerts[] | select(.riskcode=="3")' zap-report.json | wc -l)
+            WARN=$(jq '.site[].alerts[] | select(.riskcode=="2")' zap-report.json | wc -l)
+            if [ "$FAIL" -gt 0 ]; then
+              STATUS="FAIL"
+              COLOR="Red"
+            else
+              STATUS="PASS"
+              COLOR="Green"
+            fi
+          else
+            STATUS="NO REPORT"
+            COLOR="Yellow"
+            FAIL=0
+            WARN=0
+          fi
+          echo "<table border='1'>
+          <tr><th>Security Check</th><th>Status</th><th>High</th><th>Medium</th></tr>
+          <tr>
+            <td>OWASP ZAP</td>
+            <td><ac:structured-macro ac:name=\"status\">
+              <ac:parameter ac:name=\"colour\">$COLOR</ac:parameter>
+              <ac:parameter ac:name=\"title\">$STATUS</ac:parameter>
+            </ac:structured-macro></td>
+            <td>$FAIL</td>
+            <td>$WARN</td>
+          </tr>
+          </table>" > zap-summary.html
 
       - name: Generate Aggregate Table
         run: |
@@ -168,8 +212,15 @@ jobs:
             <h2>📈 Transaction-Level Aggregate</h2>
             ${fs.readFileSync('agg.html')}
 
-            <h2>🎭 Playwright Summary</h2>
-            <pre>${fs.readFileSync('pw_runs_summary.txt')}</pre>
+            <h2>🎭 Playwright Summary (All Runs)</h2>
+            <table border='1'>
+            <tr><th>Run</th><th>Start</th><th>End</th><th>Duration (sec)</th><th>Passed</th><th>Failed</th></tr>
+            $(tail -n +2 pw_runs_summary.txt | awk -F',' '{printf "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",$1,$2,$3,$4,$5,$6}')
+            </table>
+            
+            <h2>🔐 Security Scan (OWASP ZAP)</h2>
+            $(cat zap-summary.html)
+            <p>Detailed report attached: zap-report.html</p>
 
             <h2>📎 Attachments</h2>
             <ac:structured-macro ac:name="attachments"/>`;
