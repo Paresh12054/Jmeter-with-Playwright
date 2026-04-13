@@ -107,11 +107,13 @@ jobs:
           echo "<tr><th>Transaction</th><th>Total</th><th>Avg</th></tr>" >> agg.html
           echo "</table>" >> agg.html
 
-      # ✅ UPDATED CONFLUENCE LOGIC
-      - name: Publish to Confluence (Parent-Child + Index)
+      # ✅ FINAL FIXED CONFLUENCE STEP
+      - name: Publish to Confluence
         uses: actions/github-script@v7
         with:
           script: |
+            const fs = require('fs');
+
             const baseUrl = process.env.CONFLUENCE_BASE_URL;
             const email = process.env.CONFLUENCE_EMAIL;
             const token = process.env.CONFLUENCE_API_TOKEN;
@@ -128,7 +130,6 @@ jobs:
             };
 
             const now = new Date().toLocaleString("en-GB").replace(",", "");
-            const pageTitle = `Performance Report - ${now}`;
 
             async function api(url, method = "GET", body = null) {
               const res = await fetch(url, {
@@ -146,7 +147,34 @@ jobs:
               return text ? JSON.parse(text) : {};
             }
 
-            const content = `<h1>🚀 Performance & UI Test Report</h1>`;
+            // ✅ FULL ORIGINAL CONTENT (UNCHANGED)
+            const CONTENT = `<h1>🚀 Performance & UI Test Report</h1>
+
+            <h2>📏 SLA Configuration</h2>
+            <table border='1'>
+            <tr><th>Metric</th><th>Threshold</th></tr>
+            <tr><td>Avg (ms)</td><td>${process.env.SLA_AVG}</td></tr>
+            <tr><td>P90 (ms)</td><td>${process.env.SLA_P90}</td></tr>
+            <tr><td>Error %</td><td>${process.env.SLA_ERR}</td></tr>
+            </table>
+
+            <h2>⏱ Execution Timeline</h2>
+            <table border='1'>
+            <tr><th>Type</th><th>Start</th><th>End</th></tr>
+            <tr><td>JMeter</td><td>${fs.readFileSync('jm_start.txt')}</td><td>${fs.readFileSync('jm_end.txt')}</td></tr>
+            <tr><td>Playwright</td><td>${fs.readFileSync('pw_start.txt')}</td><td>${fs.readFileSync('pw_end.txt')}</td></tr>
+            </table>
+
+            <h2>📈 Transaction-Level Aggregate</h2>
+            ${fs.readFileSync('agg.html')}
+
+            <h2>🎭 Playwright Summary</h2>
+            <pre>${fs.readFileSync('pw_runs_summary.txt')}</pre>
+
+            <h2>📎 Attachments</h2>
+            <ac:structured-macro ac:name="attachments"/>`;
+
+            const pageTitle = `Performance Report - ${now}`;
 
             // CREATE CHILD PAGE
             const childPage = await api(`${baseUrl}/rest/api/content`, "POST", {
@@ -156,7 +184,7 @@ jobs:
               space: { key: spaceKey },
               body: {
                 storage: {
-                  value: content,
+                  value: CONTENT,
                   representation: "storage"
                 }
               }
@@ -164,72 +192,46 @@ jobs:
 
             const childLink = childPage._links.base + childPage._links.webui;
 
-            // FETCH INDEX PAGE
+            // UPDATE INDEX PAGE (SAFE APPEND ONLY)
             const indexPage = await api(
               `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
             );
 
-            let existingContent = indexPage.body.storage.value;
-            const currentVersion = indexPage.version.number;
+            let content = indexPage.body.storage.value;
+            const version = indexPage.version.number;
 
             const newRow = `
-              <tr style="background-color:#E3FCEF;">
+              <tr>
                 <td>${now}</td>
-                <td><a href="${childLink}"><strong>${pageTitle}</strong></a></td>
-                <td>
-                  <ac:structured-macro ac:name="status">
-                    <ac:parameter ac:name="colour">Green</ac:parameter>
-                    <ac:parameter ac:name="title">SUCCESS</ac:parameter>
-                  </ac:structured-macro>
-                </td>
+                <td><a href="${childLink}">${pageTitle}</a></td>
               </tr>
             `;
 
-            let rows = [];
-            const allRows = existingContent.match(/<tr[\s\S]*?<\/tr>/gi);
-
-            if (allRows && allRows.length > 1) {
-              const dataRows = allRows.slice(1);
-              rows = dataRows.map(row => row.replace(/<td>.*?<\/td>/, "").trim());
+            if (content.includes("</tbody>")) {
+              content = content.replace("</tbody>", `${newRow}</tbody>`);
+            } else if (content.includes("</table>")) {
+              content = content.replace("</table>", `${newRow}</table>`);
             }
-
-            rows.unshift(newRow);
-
-            rows = rows.map((row, index) => {
-              const srNo = index + 1;
-              return row.replace(/<tr[^>]*>/, `<tr><td>${srNo}</td>`);
-            });
-
-            const rebuiltRows = rows.join("");
-
-            existingContent = existingContent.replace(
-              /<tbody>[\s\S]*?<\/tbody>/,
-              `<tbody>
-                <tr>
-                  <th>Sr.No</th>
-                  <th>Created At</th>
-                  <th>Page</th>
-                  <th>Status</th>
-                </tr>
-                ${rebuiltRows}
-              </tbody>`
-            );
 
             await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
               id: indexPageId,
               type: "page",
               title: indexPage.title,
-              version: { number: currentVersion + 1 },
+              version: { number: version + 1 },
               body: {
                 storage: {
-                  value: existingContent,
+                  value: content,
                   representation: "storage"
                 }
               }
             });
 
-            require('fs').appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${childPage.id}\n`);
+            // keep attachments working
+            fs.appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${childPage.id}\n`);
 
       - name: Upload Attachments
         run: |
-          echo "Uploading attachments..."
+          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@results.jtl" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
