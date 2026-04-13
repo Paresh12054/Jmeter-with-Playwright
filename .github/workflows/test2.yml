@@ -75,12 +75,8 @@ jobs:
             if [ -s "$FILE" ]; then
               P=$(jq '[.. | objects | select(.status=="passed")] | length' "$FILE")
               F=$(jq '[.. | objects | select(.status=="failed")] | length' "$FILE")
-
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
-            else
-              P=0
-              F=0
             fi
 
             echo "$RUN_INDEX,$TS_START,$TS_END,$DURATION,$P,$F" >> $RUN_SUMMARY_FILE
@@ -118,28 +114,16 @@ jobs:
           if [ -f zap-report.json ]; then
             FAIL=$(jq '.site[].alerts[] | select(.riskcode=="3")' zap-report.json | wc -l)
             WARN=$(jq '.site[].alerts[] | select(.riskcode=="2")' zap-report.json | wc -l)
-            if [ "$FAIL" -gt 0 ]; then
-              STATUS="FAIL"
-              COLOR="Red"
-            else
-              STATUS="PASS"
-              COLOR="Green"
-            fi
+            if [ "$FAIL" -gt 0 ]; then STATUS="FAIL"; COLOR="Red"; else STATUS="PASS"; COLOR="Green"; fi
           else
-            STATUS="NO REPORT"
-            COLOR="Yellow"
-            FAIL=0
-            WARN=0
+            STATUS="NO REPORT"; COLOR="Yellow"; FAIL=0; WARN=0
           fi
 
           echo "<table border='1'>
           <tr><th>Security Check</th><th>Status</th><th>High</th><th>Medium</th></tr>
           <tr>
             <td>OWASP ZAP</td>
-            <td><ac:structured-macro ac:name=\"status\">
-              <ac:parameter ac:name=\"colour\">$COLOR</ac:parameter>
-              <ac:parameter ac:name=\"title\">$STATUS</ac:parameter>
-            </ac:structured-macro></td>
+            <td>$STATUS</td>
             <td>$FAIL</td>
             <td>$WARN</td>
           </tr>
@@ -155,31 +139,31 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            // (unchanged JS content - already correctly formatted)
+            // unchanged
 
       - name: Upload Attachments
         run: |
-          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-            -X POST -H "X-Atlassian-Token: no-check" \
-            -F "file=@results.jtl" \
-            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+          set +e
+
+          upload() {
+            FILE=$1
+            if [ -f "$FILE" ]; then
+              curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+                -X POST -H "X-Atlassian-Token: no-check" \
+                -F "file=@$FILE" \
+                "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+            fi
+          }
+
+          upload results.jtl
 
           zip -r jmeter-report.zip jmeter-report
+          upload jmeter-report.zip
 
-          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-            -X POST -H "X-Atlassian-Token: no-check" \
-            -F "file=@jmeter-report.zip" \
-            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+          upload zap-report.html
 
-          [ -f zap-report.html ] && curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-            -X POST -H "X-Atlassian-Token: no-check" \
-            -F "file=@zap-report.html" \
-            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
-
-          for f in pw-results/*.json; do
-            [ -f "$f" ] || continue
-
-            curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-              -X POST -H "X-Atlassian-Token: no-check" \
-              -F "file=@$f" \
-              "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+          if [ -d "pw-results" ]; then
+            for f in pw-results/*.json; do
+              [ -f "$f" ] && upload "$f"
+            done
+          fi
