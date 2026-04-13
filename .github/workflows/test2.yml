@@ -41,7 +41,7 @@ jobs:
       - name: Start JMeter
         run: |
           date +"%Y-%m-%d %H:%M:%S" > jm_start.txt
-          nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
+          nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined1.jmx -l results.jtl -Jduration=180 > jmeter.log 2>&1 &
           echo $! > jmeter.pid
 
       - name: Run Playwright periodically
