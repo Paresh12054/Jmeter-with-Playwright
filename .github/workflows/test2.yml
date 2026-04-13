@@ -209,6 +209,9 @@ jobs:
             <h2>🔐 Security Summary</h2>
             ${zapSummary}
 
+            <h2>📝 Observations</h2>
+            <p><i>Add observations, bottlenecks, and recommendations here.</i></p>
+
             <h2>📎 Attachments</h2>
             <ac:structured-macro ac:name="attachments"/>`;
 
