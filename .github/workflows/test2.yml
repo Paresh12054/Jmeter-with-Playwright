@@ -119,8 +119,8 @@ jobs:
             const token = process.env.CONFLUENCE_API_TOKEN;
             const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
 
-            const parentId = "5505025";
-            const indexPageId = "5505025";
+            const parentId = "6094858";
+            const indexPageId = "6094858";
 
             const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
@@ -235,3 +235,24 @@ jobs:
             -X POST -H "X-Atlassian-Token: no-check" \
             -F "file=@results.jtl" \
             "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+
+          zip -r jmeter-report.zip jmeter-report
+
+          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@jmeter-report.zip" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+
+          # 🔐 ADDED: Safe ZAP upload
+          [ -f zap-report.html ] && curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@zap-report.html" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
+
+          for f in pw-results/*.json; do
+            [ -f "$f" ] || continue
+
+            curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+              -X POST -H "X-Atlassian-Token: no-check" \
+              -F "file=@$f" \
+              "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
