@@ -68,7 +68,7 @@ jobs:
               }
             });
 
-            const childLink = baseUrl.replace("/wiki", "") + childPage._links.webui;
+            const childLink = childPage._links.base + childPage._links.webui;
 
             console.log("✅ Child page created:", childLink);
 
