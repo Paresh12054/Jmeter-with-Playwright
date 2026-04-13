@@ -16,7 +16,7 @@ jobs:
         run: |
           RESPONSE=$(curl -s -o response.txt -w "%{http_code}" \
           -X GET "$AMPLIFY_BASE_URL" \
-          -H "x-api-key: $AMPLIFY_API_KEY")
+          -H "Authorization: ApiKey $AMPLIFY_API_KEY"
 
           echo "HTTP Status: $RESPONSE"
           cat response.txt
