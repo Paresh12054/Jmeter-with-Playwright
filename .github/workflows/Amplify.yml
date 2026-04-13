@@ -1,0 +1,32 @@
+name: Amplify Connectivity Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-amplify:
+    runs-on: ubuntu-latest
+
+    env:
+      AMPLIFY_API_KEY: ${{ secrets.AMPLIFY_API_KEY }}
+      AMPLIFY_BASE_URL: https://amplify.planittesting.com/
+
+    steps:
+      - name: Test Amplify API Connection
+        run: |
+          echo "Testing Amplify connectivity..."
+
+          RESPONSE=$(curl -s -o response.txt -w "%{http_code}" \
+            -X GET "$AMPLIFY_BASE_URL" \
+            -H "Authorization: Bearer $AMPLIFY_API_KEY")
+
+          echo "HTTP Status: $RESPONSE"
+          echo "Response Body:"
+          cat response.txt
+
+          if [ "$RESPONSE" -eq 200 ]; then
+            echo "✅ Amplify connection successful"
+          else
+            echo "❌ Amplify connection failed"
+            exit 1
+          fi
