@@ -34,7 +34,6 @@ jobs:
               "Content-Type": "application/json"
             };
 
-            // ✅ Clean date format
             const now = new Date().toLocaleString("en-GB").replace(",", "");
             const pageTitle = `Test Page ${now}`;
 
@@ -54,7 +53,7 @@ jobs:
               return text ? JSON.parse(text) : {};
             }
 
-            // ✅ STEP 1: CREATE CHILD PAGE
+            // STEP 1: CREATE CHILD PAGE
             const childPage = await api(`${baseUrl}/rest/api/content`, "POST", {
               type: "page",
               title: pageTitle,
@@ -70,34 +69,33 @@ jobs:
 
             const childLink = childPage._links.base + childPage._links.webui;
 
-            console.log("✅ Child page created:", childLink);
+            console.log("Child page created:", childLink);
 
-            // ✅ STEP 2: FETCH INDEX PAGE
+            // STEP 2: FETCH INDEX PAGE
             const indexPage = await api(
               `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
             );
 
             if (indexPage.type !== "page") {
-              throw new Error("❌ INDEX_PAGE_ID is NOT a page.");
+              throw new Error("INDEX_PAGE_ID is NOT a page.");
             }
 
             if (!indexPage.body || !indexPage.body.storage) {
-              throw new Error("❌ Index page body missing.");
+              throw new Error("Index page body missing.");
             }
 
             let content = indexPage.body.storage.value;
             const currentVersion = indexPage.version.number;
 
-            // ✅ STEP 3: PREVENT DUPLICATE
+            // STEP 3: PREVENT DUPLICATE
             if (content.includes(childLink)) {
-              console.log("⚠️ Entry already exists, skipping update");
+              console.log("Entry already exists, skipping update");
               return;
             }
 
-            // ✅ STEP 4: NEW ROW (always Sr.No = 1 initially)
-            let newRow = `
+            // STEP 4: NEW ROW (NO Sr.No here)
+            const newRow = `
               <tr style="background-color:#E3FCEF;">
-                <td>1</td>
                 <td>${now}</td>
                 <td><a href="${childLink}"><strong>${pageTitle}</strong></a></td>
                 <td>
@@ -109,41 +107,34 @@ jobs:
               </tr>
             `;
 
-            // ✅ STEP 5: REBUILD TABLE WITH UPDATED SERIAL NUMBERS
+            // STEP 5: FIXED TABLE REBUILD
 
             let rows = [];
 
-            // Extract existing rows (excluding header)
-            const existingRows = content.match(/<tr[\s\S]*?<\/tr>/gi);
+            const allRows = content.match(/<tr[\s\S]*?<\/tr>/gi);
 
-            if (existingRows && existingRows.length > 1) {
-              // skip header row
-              const dataRows = existingRows.slice(1);
+            if (allRows && allRows.length > 1) {
+              const dataRows = allRows.slice(1);
 
-              // remove old serial numbers
               rows = dataRows.map(row => {
-                return row.replace(/<td>.*?<\/td>/, ""); // remove first column
+                return row.replace(/<td>.*?<\/td>/, "").trim();
               });
             }
 
-            // Add new row at top (without modifying structure)
             rows.unshift(newRow);
 
-            // Rebuild rows with correct serial numbers
             rows = rows.map((row, index) => {
               const srNo = index + 1;
 
-              // replace first <td> or insert if missing
-              if (row.includes("<td>")) {
-                return row.replace(/<td>.*?<\/td>/, `<td>${srNo}</td>`);
-              } else {
-                return row.replace("<tr", `<tr><td>${srNo}</td>`);
-              }
+              return row.replace(
+                /<tr[^>]*>/,
+                `<tr><td>${srNo}</td>`
+              );
             });
 
             const rebuiltRows = rows.join("");
 
-            // ✅ STEP 6: REPLACE TABLE CONTENT
+            // STEP 6: UPDATE TABLE
             if (content.includes("</tbody>")) {
               content = content.replace(
                 /<tbody>[\s\S]*?<\/tbody>/,
@@ -172,36 +163,9 @@ jobs:
                   </tbody>
                 </table>`
               );
-            } else {
-              console.log("⚠️ No table found → creating dashboard");
-
-              content += `
-                <h1>📊 Automation Dashboard</h1>
-
-                <p><strong>Last Updated:</strong> ${now}</p>
-
-                <ac:structured-macro ac:name="panel">
-                  <ac:parameter ac:name="title">📄 Child Page Activity</ac:parameter>
-                  <ac:rich-text-body>
-
-                    <table>
-                      <tbody>
-                        <tr>
-                          <th>Sr.No</th>
-                          <th>Created At</th>
-                          <th>Page</th>
-                          <th>Status</th>
-                        </tr>
-                        ${rebuiltRows}
-                      </tbody>
-                    </table>
-
-                  </ac:rich-text-body>
-                </ac:structured-macro>
-              `;
             }
 
-            // ✅ STEP 7: UPDATE PAGE
+            // STEP 7: UPDATE PAGE
             await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
               id: indexPageId,
               type: "page",
@@ -215,4 +179,4 @@ jobs:
               }
             });
 
-            console.log("✅ Index page updated with auto-reordered Sr.No");
+            console.log("Index page updated successfully");
