@@ -16,15 +16,17 @@ jobs:
           run: |
             echo "Testing Amplify connectivity..."
 
-            RESPONSE=$(curl -s -o response.txt -w "%{http_code}" \
+            curl -s -D headers.txt -o response.txt \
             -X GET "${AMPLIFY_BASE_URL}" \
-            -H "Authorization: Bearer ${AMPLIFY_API_KEY}"
+            -H "Authorization: ApiKey ${AMPLIFY_API_KEY}"
 
-            echo "HTTP Status: $RESPONSE"
+            STATUS=$(grep HTTP headers.txt | tail -1 | awk '{print $2}')
+
+            echo "HTTP Status: $STATUS"
             echo "Response Body:"
             cat response.txt
 
-            if [ "$RESPONSE" -eq 200 ]; then
+            if [ "$STATUS" = "200" ]; then
             echo "✅ Amplify connection successful"
             else
             echo "❌ Amplify connection failed"
