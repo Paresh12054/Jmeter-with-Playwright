@@ -9,28 +9,24 @@ jobs:
 
     env:
       AMPLIFY_API_KEY: ${{ secrets.AMPLIFY_API_KEY }}
-      AMPLIFY_BASE_URL: https://amplify.planittesting.com/
+      AMPLIFY_BASE_URL: https://amplify.planittesting.com
 
     steps:
-        - name: Test Amplify API Connection
-          run: |
-            echo "Testing Amplify connectivity..."
+      - name: Test Amplify API Connection
+        run: |
+          echo "Testing Amplify connectivity..."
 
-            curl -v \
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "${AMPLIFY_BASE_URL}" \
             -H "x-api-key: ${AMPLIFY_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{}'
+            -d '{}')
 
-            STATUS=$(grep HTTP headers.txt | tail -1 | awk '{print $2}')
+          echo "HTTP Status: $RESPONSE"
 
-            echo "HTTP Status: $STATUS"
-            echo "Response Body:"
-            cat response.txt
-
-            if [ "$STATUS" = "200" ]; then
+          if [ "$RESPONSE" = "200" ]; then
             echo "✅ Amplify connection successful"
-            else
+          else
             echo "❌ Amplify connection failed"
             exit 1
-            fi
+          fi
