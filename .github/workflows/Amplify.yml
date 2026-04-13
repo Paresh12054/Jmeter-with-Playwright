@@ -16,9 +16,11 @@ jobs:
           run: |
             echo "Testing Amplify connectivity..."
 
-            curl -s -D headers.txt -o response.txt \
-            -X GET "${AMPLIFY_BASE_URL}" \
-            -H "x-api-key: ${AMPLIFY_API_KEY}"
+            curl -v \
+            -X POST "${AMPLIFY_BASE_URL}" \
+            -H "x-api-key: ${AMPLIFY_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
 
             STATUS=$(grep HTTP headers.txt | tail -1 | awk '{print $2}')
 
