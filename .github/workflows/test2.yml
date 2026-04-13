@@ -1,0 +1,237 @@
+name: Test2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  performance-and-ui:
+    runs-on: ubuntu-latest
+
+    env:
+      CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+      CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+      CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+      CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq zip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - run: npm install
+      - run: npx playwright install --with-deps
+
+      - name: Install JMeter
+        run: |
+          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.tgz
+          tar -xzf apache-jmeter-5.6.3.tgz
+          mv apache-jmeter-5.6.3 jmeter
+
+      - name: Load SLA Config
+        run: |
+          echo "SLA_AVG=$(jq '.avg_ms' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_P90=$(jq '.p90_ms' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_ERR=$(jq '.error_percent' config/sla.json)" >> $GITHUB_ENV
+
+      - name: Start JMeter
+        run: |
+          date +"%Y-%m-%d %H:%M:%S" > jm_start.txt
+          nohup ./jmeter/bin/jmeter -n -t scripts/GithubTest_combined.jmx -l results.jtl -Jduration=600 > jmeter.log 2>&1 &
+          echo $! > jmeter.pid
+
+      - name: Run Playwright periodically
+        run: |
+          mkdir -p pw-results
+          date +"%Y-%m-%d %H:%M:%S" > pw_start.txt
+
+          END=$((SECONDS+600))
+          PASSED=0
+          FAILED=0
+
+          RUN_INDEX=1
+          RUN_SUMMARY_FILE=pw_runs_summary.txt
+          echo "Run,Start,End,Duration(sec),Passed,Failed" > $RUN_SUMMARY_FILE
+
+          while [ $SECONDS -lt $END ]; do
+            TS_START=$(date +"%Y-%m-%d %H:%M:%S")
+            START_SEC=$(date +%s)
+
+            TS=$(date +"%Y-%m-%d_%H-%M-%S")
+            FILE="pw-results/result-$TS.json"
+
+            OUTPUT=$(npx playwright test tests/Demo1.spec.ts --reporter=json || true)
+            echo "$OUTPUT" > "$FILE"
+
+            END_SEC=$(date +%s)
+            TS_END=$(date +"%Y-%m-%d %H:%M:%S")
+
+            DURATION=$((END_SEC - START_SEC))
+
+            if [ -s "$FILE" ]; then
+              P=$(jq '[.. | objects | select(.status=="passed")] | length' "$FILE")
+              F=$(jq '[.. | objects | select(.status=="failed")] | length' "$FILE")
+
+              PASSED=$((PASSED + P))
+              FAILED=$((FAILED + F))
+            else
+              P=0
+              F=0
+            fi
+
+            echo "$RUN_INDEX,$TS_START,$TS_END,$DURATION,$P,$F" >> $RUN_SUMMARY_FILE
+            RUN_INDEX=$((RUN_INDEX+1))
+            sleep 180
+          done
+
+          date +"%Y-%m-%d %H:%M:%S" > pw_end.txt
+          echo $PASSED > pw_passed.txt
+          echo $FAILED > pw_failed.txt
+
+      - name: Stop JMeter
+        run: |
+          kill $(cat jmeter.pid) || true
+          date +"%Y-%m-%d %H:%M:%S" > jm_end.txt
+
+      - name: Generate JMeter HTML Report
+        run: |
+          ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
+
+      - name: Generate Aggregate Table
+        run: |
+          echo "<table border='1'>" > agg.html
+          echo "<tr><th>Transaction</th><th>Total</th><th>Avg</th></tr>" >> agg.html
+          echo "</table>" >> agg.html
+
+      # ✅ FINAL FIXED CONFLUENCE STEP
+      - name: Publish to Confluence
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const baseUrl = process.env.CONFLUENCE_BASE_URL;
+            const email = process.env.CONFLUENCE_EMAIL;
+            const token = process.env.CONFLUENCE_API_TOKEN;
+            const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
+
+            const parentId = "5505025";
+            const indexPageId = "5505025";
+
+            const auth = Buffer.from(`${email}:${token}`).toString("base64");
+
+            const headers = {
+              "Authorization": `Basic ${auth}`,
+              "Content-Type": "application/json"
+            };
+
+            const now = new Date().toLocaleString("en-GB").replace(",", "");
+
+            async function api(url, method = "GET", body = null) {
+              const res = await fetch(url, {
+                method,
+                headers,
+                body: body ? JSON.stringify(body) : null
+              });
+
+              const text = await res.text();
+
+              if (!res.ok) {
+                throw new Error(`${method} ${url} failed:\n${text}`);
+              }
+
+              return text ? JSON.parse(text) : {};
+            }
+
+            // ✅ FULL ORIGINAL CONTENT (UNCHANGED)
+            const CONTENT = `<h1>🚀 Performance & UI Test Report</h1>
+
+            <h2>📏 SLA Configuration</h2>
+            <table border='1'>
+            <tr><th>Metric</th><th>Threshold</th></tr>
+            <tr><td>Avg (ms)</td><td>${process.env.SLA_AVG}</td></tr>
+            <tr><td>P90 (ms)</td><td>${process.env.SLA_P90}</td></tr>
+            <tr><td>Error %</td><td>${process.env.SLA_ERR}</td></tr>
+            </table>
+
+            <h2>⏱ Execution Timeline</h2>
+            <table border='1'>
+            <tr><th>Type</th><th>Start</th><th>End</th></tr>
+            <tr><td>JMeter</td><td>${fs.readFileSync('jm_start.txt')}</td><td>${fs.readFileSync('jm_end.txt')}</td></tr>
+            <tr><td>Playwright</td><td>${fs.readFileSync('pw_start.txt')}</td><td>${fs.readFileSync('pw_end.txt')}</td></tr>
+            </table>
+
+            <h2>📈 Transaction-Level Aggregate</h2>
+            ${fs.readFileSync('agg.html')}
+
+            <h2>🎭 Playwright Summary</h2>
+            <pre>${fs.readFileSync('pw_runs_summary.txt')}</pre>
+
+            <h2>📎 Attachments</h2>
+            <ac:structured-macro ac:name="attachments"/>`;
+
+            const pageTitle = `Performance Report - ${now}`;
+
+            // CREATE CHILD PAGE
+            const childPage = await api(`${baseUrl}/rest/api/content`, "POST", {
+              type: "page",
+              title: pageTitle,
+              ancestors: [{ id: parentId }],
+              space: { key: spaceKey },
+              body: {
+                storage: {
+                  value: CONTENT,
+                  representation: "storage"
+                }
+              }
+            });
+
+            const childLink = childPage._links.base + childPage._links.webui;
+
+            // UPDATE INDEX PAGE (SAFE APPEND ONLY)
+            const indexPage = await api(
+              `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
+            );
+
+            let content = indexPage.body.storage.value;
+            const version = indexPage.version.number;
+
+            const newRow = `
+              <tr>
+                <td>${now}</td>
+                <td><a href="${childLink}">${pageTitle}</a></td>
+              </tr>
+            `;
+
+            if (content.includes("</tbody>")) {
+              content = content.replace("</tbody>", `${newRow}</tbody>`);
+            } else if (content.includes("</table>")) {
+              content = content.replace("</table>", `${newRow}</table>`);
+            }
+
+            await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
+              id: indexPageId,
+              type: "page",
+              title: indexPage.title,
+              version: { number: version + 1 },
+              body: {
+                storage: {
+                  value: content,
+                  representation: "storage"
+                }
+              }
+            });
+
+            // keep attachments working
+            fs.appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${childPage.id}\n`);
+
+      - name: Upload Attachments
+        run: |
+          curl -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST -H "X-Atlassian-Token: no-check" \
+            -F "file=@results.jtl" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
