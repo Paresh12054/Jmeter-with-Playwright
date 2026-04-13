@@ -49,7 +49,7 @@ jobs:
           mkdir -p pw-results
           date +"%Y-%m-%d %H:%M:%S" > pw_start.txt
 
-          END=$((SECONDS+600))
+          END=$((SECONDS+180))
           PASSED=0
           FAILED=0
 
