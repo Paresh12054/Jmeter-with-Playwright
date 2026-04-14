@@ -206,13 +206,14 @@ jobs:
               printf "<td>%s</td>", (overall=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
               printf "</tr>\n"
             }
-          }' results.jtl >> agg.html
+          }' 
+          results.jtl >> agg.html
           echo "</table>" >> agg.html
 
-          - name: Publish to Confluence
-            uses: actions/github-script@v7
-            with:
-              script: |
+      - name: Publish to Confluence
+        uses: actions/github-script@v7
+        with:
+            script: |
               const fs = require('fs');
 
               const baseUrl = process.env.CONFLUENCE_BASE_URL;
@@ -256,110 +257,110 @@ jobs:
                 return `<tr><td>${a}</td><td>${b}</td><td>${c}</td><td>${d}</td><td>${e}</td><td>${f}</td></tr>`;
               }).join('');
 
-            // ✅ ZAP summary
-            const zapSummary = fs.readFileSync('zap-summary.html').toString();
+              // ✅ ZAP summary
+              const zapSummary = fs.readFileSync('zap-summary.html').toString();
 
-            // ✅ Page Content
-            const CONTENT = `<h1>🚀 Performance & UI Test Report</h1>
+              // ✅ Page Content
+              const CONTENT = `<h1>🚀 Performance & UI Test Report</h1>
 
-            <h2>📏 SLA Configuration</h2>
-            <table border='1'>
-            <tr><th>Metric</th><th>Threshold</th></tr>
-            <tr><td>Avg (ms)</td><td>${process.env.SLA_AVG}</td></tr>
-            <tr><td>P90 (ms)</td><td>${process.env.SLA_P90}</td></tr>
-            <tr><td>Error %</td><td>${process.env.SLA_ERR}</td></tr>
-             </table>
+              <h2>📏 SLA Configuration</h2>
+              <table border='1'>
+              <tr><th>Metric</th><th>Threshold</th></tr>
+              <tr><td>Avg (ms)</td><td>${process.env.SLA_AVG}</td></tr>
+              <tr><td>P90 (ms)</td><td>${process.env.SLA_P90}</td></tr>
+              <tr><td>Error %</td><td>${process.env.SLA_ERR}</td></tr>
+               </table>
 
-            <h2>⏱ Execution Timeline</h2>
-            <table border='1'>
-            <tr><th>Type</th><th>Start</th><th>End</th></tr>
-            <tr><td>JMeter</td><td>${fs.readFileSync('jm_start.txt')}</td><td>${fs.readFileSync('jm_end.txt')}</td></tr>
-            <tr><td>Playwright</td><td>${fs.readFileSync('pw_start.txt')}</td><td>${fs.readFileSync('pw_end.txt')}</td></tr>
-            </table>
+              <h2>⏱ Execution Timeline</h2>
+              <table border='1'>
+              <tr><th>Type</th><th>Start</th><th>End</th></tr>
+              <tr><td>JMeter</td><td>${fs.readFileSync('jm_start.txt')}</td><td>${fs.readFileSync('jm_end.txt')}</td></tr>
+              <tr><td>Playwright</td><td>${fs.readFileSync('pw_start.txt')}</td><td>${fs.readFileSync('pw_end.txt')}</td></tr>
+              </table>
 
-            <h2>📈 Transaction-Level Aggregate</h2>
-            ${fs.readFileSync('agg.html')}
+              <h2>📈 Transaction-Level Aggregate</h2>
+              ${fs.readFileSync('agg.html')}
+  
+              <h2>🎭 Playwright Summary</h2>
+              <table border='1'>
+              <tr><th>Run</th><th>Start</th><th>End</th><th>Duration</th><th>Passed</th><th>Failed</th></tr>
+              ${pwRows}
+              </table>
 
-            <h2>🎭 Playwright Summary</h2>
-            <table border='1'>
-            <tr><th>Run</th><th>Start</th><th>End</th><th>Duration</th><th>Passed</th><th>Failed</th></tr>
-            ${pwRows}
-            </table>
+              <h2>🔐 Security Summary</h2>
+              ${zapSummary}
 
-            <h2>🔐 Security Summary</h2>
-            ${zapSummary}
+              <h2>📝 Observations</h2>
+              <p><i>Add observations, bottlenecks, and recommendations here.</i></p>
 
-            <h2>📝 Observations</h2>
-            <p><i>Add observations, bottlenecks, and recommendations here.</i></p>
+              <h2>📎 Attachments</h2>
+              <ac:structured-macro ac:name="attachments"/>`;
 
-            <h2>📎 Attachments</h2>
-            <ac:structured-macro ac:name="attachments"/>`;
+              const title = `Performance Report - ${now}`;
 
-            const title = `Performance Report - ${now}`;
-
-            // ✅ Create child page
-            const child = await api(`${baseUrl}/rest/api/content`, "POST", {
-            type: "page",
-            title: title,
-            ancestors: [{ id: parentId }],
-            space: { key: spaceKey },
-            body: {
-              storage: {
-                value: CONTENT,
-                representation: "storage"
+              // ✅ Create child page
+              const child = await api(`${baseUrl}/rest/api/content`, "POST", {
+              type: "page",
+              title: title,
+              ancestors: [{ id: parentId }],
+              space: { key: spaceKey },
+              body: {
+                storage: {
+                  value: CONTENT,
+                  representation: "storage"
               }
-            }
-            });
+              }
+              });
 
-            const link = child._links.base + child._links.webui;
+              const link = child._links.base + child._links.webui;
 
-            // ✅ Fetch parent page
-            const parent = await api(
-            `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
-            );
+                // ✅ Fetch parent page
+              const parent = await api(
+              `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
+              );
 
-            let html = parent.body.storage.value;
+              let html = parent.body.storage.value;
 
-            // ✅ Sr.No calculation
-            let count = (html.match(/<tr>/g) || []).length - 1;
-            if (count < 0) count = 0;
-            const srNo = count + 1;
+              // ✅ Sr.No calculation
+              let count = (html.match(/<tr>/g) || []).length - 1;
+              if (count < 0) count = 0;
+              const srNo = count + 1;
 
-            // ✅ Status
-            const status = "SUCCESS";
+              // ✅ Status
+              const status = "SUCCESS";
 
-            const row = `
-            <tr>
-              <td>${srNo}</td>
-              <td>${now}</td>
-              <td><a href="${link}">${title}</a></td>
-              <td>${status}</td>
-              </tr>`;
+              const row = `
+              <tr>
+                <td>${srNo}</td>
+                <td>${now}</td>
+                <td><a href="${link}">${title}</a></td>
+                <td>${status}</td>
+                </tr>`;
 
-            // ✅ Append row safely
-            html = html.includes("</tbody>")
-            ? html.replace("</tbody>", row + "</tbody>")
-            : html + `<table><tbody>
-            <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Status</th></tr>
-            ${row}
-            </tbody></table>`;
+              // ✅ Append row safely
+              html = html.includes("</tbody>")
+              ? html.replace("</tbody>", row + "</tbody>")
+              : html + `<table><tbody>
+              <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Status</th></tr>
+              ${row}
+              </tbody></table>`;
 
-            // ✅ Update parent page
-            await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
-            id: indexPageId,
-            type: "page",
-            title: parent.title,
-            version: { number: parent.version.number + 1 },
+              // ✅ Update parent page
+              await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
+              id: indexPageId,
+              type: "page",
+              title: parent.title,
+              version: { number: parent.version.number + 1 },
               body: {
                 storage: {
                 value: html,
               representation: "storage"
               }
-            }
-          });
+              }
+              });
 
-          // ✅ Export page ID for attachments
-          fs.appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${child.id}\n`);
+              // ✅ Export page ID for attachments
+              fs.appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${child.id}\n`);
 
       - name: Upload Attachments
         run: |
