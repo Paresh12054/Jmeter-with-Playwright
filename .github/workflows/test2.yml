@@ -206,9 +206,8 @@ jobs:
               printf "<td>%s</td>", (overall=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
               printf "</tr>\n"
             }
-          }' 
-          results.jtl >> agg.html
-          echo "</table>" >> agg.html
+          }' results.jtl >> agg.html
+             echo "</table>" >> agg.html
 
       - name: Publish to Confluence
         uses: actions/github-script@v7
