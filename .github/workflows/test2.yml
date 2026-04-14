@@ -269,11 +269,13 @@ jobs:
 
       - name: Extract TOTAL Metrics
         run: |
-          AVG=$(grep -A1 "TOTAL" agg.html | grep "<td>" | sed -n '3p' | sed 's/.*<td>\(.*\)<\/td>.*/\1/')
-          P90=$(grep -A1 "TOTAL" agg.html | grep "<td>" | sed -n '4p' | sed 's/.*<td>\(.*\)<\/td>.*/\1/')
+          TOTAL_ROW=$(grep "TOTAL" agg.html)
 
-          echo "TOTAL_AVG=$AVG" >> $GITHUB_ENV
-          echo "TOTAL_P90=$P90" >> $GITHUB_ENV
+          TOTAL_AVG=$(echo "$TOTAL_ROW" | sed -E 's/.*<td>TOTAL<\/td><td>[0-9]+<\/td><td>([0-9]+)<\/td>.*/\1/')
+          TOTAL_P90=$(echo "$TOTAL_ROW" | sed -E 's/.*<td>TOTAL<\/td><td>[0-9]+<\/td><td>[0-9]+<\/td><td>([0-9]+)<\/td>.*/\1/')
+
+          echo "TOTAL_AVG=$TOTAL_AVG" >> $GITHUB_ENV
+          echo "TOTAL_P90=$TOTAL_P90" >> $GITHUB_ENV
 
       - name: Evaluate Overall SLA Status
         run: |
