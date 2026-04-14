@@ -357,8 +357,15 @@ jobs:
               let html = parent.body.storage.value;
 
               // ✅ Sr.No calculation
-              let count = (html.match(/<tr>/g) || []).length - 1;
-              if (count < 0) count = 0;
+              let match = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
+
+              let count = 0;
+
+              if (match && match[1]) {
+              const rows = match[1].match(/<tr>/g);
+              count = rows ? rows.length - 1 : 0; // exclude header row
+              }
+
               const srNo = count + 1;
 
               // ✅ Status
