@@ -117,16 +117,27 @@ jobs:
           if [ -f zap-report.json ]; then
             FAIL=$(jq '.site[].alerts[] | select(.riskcode=="3")' zap-report.json | wc -l)
             WARN=$(jq '.site[].alerts[] | select(.riskcode=="2")' zap-report.json | wc -l)
-            if [ "$FAIL" -gt 0 ]; then STATUS="FAIL"; COLOR="Red"; else STATUS="PASS"; COLOR="Green"; fi
+            if [ "$FAIL" -gt 0 ]; then
+              STATUS="FAIL"
+              COLOR="Red"
+            else
+              STATUS="PASS"
+              COLOR="Green"
+            fi
           else
-            STATUS="NO REPORT"; COLOR="Yellow"; FAIL=0; WARN=0
+            STATUS="NO REPORT"
+            COLOR="Yellow"
+            FAIL=0
+            WARN=0
           fi
-
           echo "<table border='1'>
           <tr><th>Security Check</th><th>Status</th><th>High</th><th>Medium</th></tr>
           <tr>
             <td>OWASP ZAP</td>
-            <td>$STATUS</td>
+            <td><ac:structured-macro ac:name=\"status\">
+              <ac:parameter ac:name=\"colour\">$COLOR</ac:parameter>
+              <ac:parameter ac:name=\"title\">$STATUS</ac:parameter>
+            </ac:structured-macro></td>
             <td>$FAIL</td>
             <td>$WARN</td>
           </tr>
@@ -134,52 +145,121 @@ jobs:
 
       - name: Generate Aggregate Table
         run: |
-          echo "<table border='1'>" > agg.html
-          echo "<tr><th>Transaction</th><th>Total</th><th>Avg</th></tr>" >> agg.html
+          echo "<table border='1' style='border-collapse: collapse;'>" > agg.html
+          echo "<tr>
+          <th>Transaction</th>
+          <th>Total</th>
+          <th>Avg (ms)</th>
+          <th>P90 (ms)</th>
+          <th>P95 (ms)</th>
+          <th>Error %</th>
+          <th>Avg SLA</th>
+          <th>P90 SLA</th>
+          <th>Overall SLA</th>
+          </tr>" >> agg.html
+          awk -v sla_avg="$SLA_AVG" -v sla_p90="$SLA_P90" -F',' '
+          NR>1 {
+            label=$3
+            success=tolower($8)
+            gsub(/\r/,"",success)
+            gsub(/^[ \t"]+|[ \t"]+$/, "", success)
+            if (label ~ /^PT[0-9]+_/) {
+              total[label]++
+              sum[label]+=$2
+              if (success == "false" || success == "0") fail[label]++
+              times[label]=times[label] " " $2
+            }
+          }
+          END {
+            for (l in total) {
+              n=split(times[l], arr, " ")
+              idx=0
+              for(i=1;i<=n;i++){
+                if(arr[i]!="") clean[++idx]=arr[i]
+              }
+              n=idx
+              for(i=1;i<=n;i++){
+                for(j=i+1;j<=n;j++){
+                  if(clean[i]>clean[j]){
+                    tmp=clean[i]; clean[i]=clean[j]; clean[j]=tmp
+                  }
+                }
+              }
+              p90_index = int((n*90 + 99)/100)
+              p95_index = int((n*95 + 99)/100)
+              p90 = clean[p90_index]
+              p95 = clean[p95_index]
+              avg = int(sum[l]/total[l])
+              err = (total[l] > 0) ? (fail[l]/total[l])*100 : 0
+              avg_sla = (avg <= sla_avg) ? "PASS" : "FAIL"
+              p90_sla = (p90 <= sla_p90) ? "PASS" : "FAIL"
+              overall = (avg_sla=="PASS" && p90_sla=="PASS") ? "PASS" : "FAIL"
+              printf "<tr>"
+              printf "<td>%s</td>", l
+              printf "<td>%d</td>", total[l]
+              printf "<td>%d</td>", avg
+              printf "<td>%d</td>", p90
+              printf "<td>%d</td>", p95
+              printf "<td>%.2f</td>", err
+              printf "<td>%s</td>", (avg_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+              printf "<td>%s</td>", (p90_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+              printf "<td>%s</td>", (overall=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
+              printf "</tr>\n"
+            }
+          }' results.jtl >> agg.html
           echo "</table>" >> agg.html
 
-      - name: Publish to Confluence
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
+          - name: Publish to Confluence
+            uses: actions/github-script@v7
+            with:
+              script: |
+              const fs = require('fs');
 
-            const baseUrl = process.env.CONFLUENCE_BASE_URL;
-            const email = process.env.CONFLUENCE_EMAIL;
-            const token = process.env.CONFLUENCE_API_TOKEN;
-            const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
+              const baseUrl = process.env.CONFLUENCE_BASE_URL;
+              const email = process.env.CONFLUENCE_EMAIL;
+              const token = process.env.CONFLUENCE_API_TOKEN;
+              const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
 
-            const parentId = "6094858";
-            const indexPageId = "6094858";
+              const parentId = "6094858";
+              const indexPageId = "6094858";
 
-            const auth = Buffer.from(`${email}:${token}`).toString("base64");
+              const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
-            const headers = {
+              const headers = {
               "Authorization": `Basic ${auth}`,
               "Content-Type": "application/json"
-            };
+               };
 
-            const now = new Date().toLocaleString("en-GB").replace(",", "");
+              const now = new Date().toLocaleString("en-GB").replace(",", "");
 
-            async function api(url, method="GET", body=null){
-              const res = await fetch(url,{method,headers,body:body?JSON.stringify(body):null});
+              async function api(url, method = "GET", body = null) {
+              const res = await fetch(url, {
+              method,
+              headers,
+              body: body ? JSON.stringify(body) : null
+              });
+
               const text = await res.text();
-              if(!res.ok) throw new Error(text);
-              return text?JSON.parse(text):{};
-            }
+              if (!res.ok) throw new Error(text);
 
-            const pwRows = fs.readFileSync('pw_runs_summary.txt')
+              return text ? JSON.parse(text) : {};
+              }
+
+              // ✅ Playwright summary rows
+              const pwRows = fs.readFileSync('pw_runs_summary.txt')
               .toString()
               .split('\n')
               .slice(1)
               .map(line => {
-                if (!line) return "";
-                const [a,b,c,d,e,f] = line.split(',');
+              if (!line) return "";
+                const [a, b, c, d, e, f] = line.split(',');
                 return `<tr><td>${a}</td><td>${b}</td><td>${c}</td><td>${d}</td><td>${e}</td><td>${f}</td></tr>`;
               }).join('');
 
+            // ✅ ZAP summary
             const zapSummary = fs.readFileSync('zap-summary.html').toString();
 
+            // ✅ Page Content
             const CONTENT = `<h1>🚀 Performance & UI Test Report</h1>
 
             <h2>📏 SLA Configuration</h2>
@@ -188,7 +268,7 @@ jobs:
             <tr><td>Avg (ms)</td><td>${process.env.SLA_AVG}</td></tr>
             <tr><td>P90 (ms)</td><td>${process.env.SLA_P90}</td></tr>
             <tr><td>Error %</td><td>${process.env.SLA_ERR}</td></tr>
-            </table>
+             </table>
 
             <h2>⏱ Execution Timeline</h2>
             <table border='1'>
@@ -217,35 +297,69 @@ jobs:
 
             const title = `Performance Report - ${now}`;
 
-            const child = await api(`${baseUrl}/rest/api/content`,"POST",{
-              type:"page",
-              title:title,
-              ancestors:[{id:parentId}],
-              space:{key:spaceKey},
-              body:{storage:{value:CONTENT,representation:"storage"}}
+            // ✅ Create child page
+            const child = await api(`${baseUrl}/rest/api/content`, "POST", {
+            type: "page",
+            title: title,
+            ancestors: [{ id: parentId }],
+            space: { key: spaceKey },
+            body: {
+              storage: {
+                value: CONTENT,
+                representation: "storage"
+              }
+            }
             });
 
             const link = child._links.base + child._links.webui;
 
-            const parent = await api(`${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`);
+            // ✅ Fetch parent page
+            const parent = await api(
+            `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
+            );
 
             let html = parent.body.storage.value;
 
-            const row = `<tr><td></td><td>${now}</td><td><a href="${link}">${title}</a></td><td></td></tr>`;
+            // ✅ Sr.No calculation
+            let count = (html.match(/<tr>/g) || []).length - 1;
+            if (count < 0) count = 0;
+            const srNo = count + 1;
 
+            // ✅ Status
+            const status = "SUCCESS";
+
+            const row = `
+            <tr>
+              <td>${srNo}</td>
+              <td>${now}</td>
+              <td><a href="${link}">${title}</a></td>
+              <td>${status}</td>
+              </tr>`;
+
+            // ✅ Append row safely
             html = html.includes("</tbody>")
-              ? html.replace("</tbody>", row + "</tbody>")
-              : html + `<table><tbody><tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Status</th></tr>${row}</tbody></table>`;
+            ? html.replace("</tbody>", row + "</tbody>")
+            : html + `<table><tbody>
+            <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Status</th></tr>
+            ${row}
+            </tbody></table>`;
 
-            await api(`${baseUrl}/rest/api/content/${indexPageId}`,"PUT",{
-              id:indexPageId,
-              type:"page",
-              title:parent.title,
-              version:{number:parent.version.number+1},
-              body:{storage:{value:html,representation:"storage"}}
-            });
+            // ✅ Update parent page
+            await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
+            id: indexPageId,
+            type: "page",
+            title: parent.title,
+            version: { number: parent.version.number + 1 },
+              body: {
+                storage: {
+                value: html,
+              representation: "storage"
+              }
+            }
+          });
 
-            require('fs').appendFileSync(process.env.GITHUB_ENV,`PAGE_ID=${child.id}\n`);
+          // ✅ Export page ID for attachments
+          fs.appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${child.id}\n`);
 
       - name: Upload Attachments
         run: |
