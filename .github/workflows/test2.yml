@@ -326,7 +326,15 @@ jobs:
               const srNo = count + 1;
 
               // ✅ Status
-              const status = "SUCCESS";
+              const status = (process.env.SOME_FLAG === "FAIL")
+              ? `<ac:structured-macro ac:name="status">
+               <ac:parameter ac:name="colour">Red</ac:parameter>
+               <ac:parameter ac:name="title">FAIL</ac:parameter>
+               </ac:structured-macro>`
+              : `<ac:structured-macro ac:name="status">
+               <ac:parameter ac:name="colour">Green</ac:parameter>
+               <ac:parameter ac:name="title">SUCCESS</ac:parameter>
+               </ac:structured-macro>`;
 
               const row = `
               <tr>
