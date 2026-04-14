@@ -209,6 +209,22 @@ jobs:
           }' results.jtl >> agg.html
              echo "</table>" >> agg.html
 
+      - name: Extract Duration from JTL
+        run: |
+          START=$(awk -F',' 'NR==2 {print $1}' results.jtl)
+          END=$(awk -F',' 'END {print $1}' results.jtl)
+
+          DURATION_MS=$((END - START))
+          DURATION_SEC=$((DURATION_MS / 1000))
+
+          echo "TEST_DURATION=${DURATION_SEC} sec" >> $GITHUB_ENV 
+
+      - name: Extract Total Concurrent Users
+        run: |
+          USERS=$(grep -oP '(?<=ThreadGroup.num_threads">)\d+' scripts/GithubTest_combined1.jmx | awk '{sum+=$1} END {print sum}')
+
+          echo "CONCURRENT_USERS=$USERS" >> $GITHUB_ENV
+
       - name: Publish to Confluence
         uses: actions/github-script@v7
         with:
@@ -260,7 +276,19 @@ jobs:
               const zapSummary = fs.readFileSync('zap-summary.html').toString();
 
               // ✅ Page Content
-              const CONTENT = `<h1>🚀 Performance & UI Test Report</h1>
+              const CONTENT = `
+              <h1>🚀 Performance & UI Test Report</h1>
+
+              <h2>📊 Test Summary</h2>
+              <table border='1' style='border-collapse: collapse; width: 60%;'>
+              <tr><th>Test Type</th><td>Automation + Load + Security</td></tr>
+              <tr><th>Test Date</th><td>${now}</td></tr>
+              <tr><th>Test Duration</th><td>${process.env.TEST_DURATION}</td></tr>
+              <tr><th>Concurrent Users</th><td>${process.env.CONCURRENT_USERS}</td></tr>
+              <tr><th>Load Test Description</th><td>To perform performance and load testing of the web application using defined concurrent users to evaluate system behavior, response times, and stability under expected and peak load conditions.</td></tr>
+              <tr><th>Automation Test Description</th><td>To validate application functionality and page rendering performance using automated UI tests while simulating real user interactions during background load execution.</td></tr>
+              <tr><th>Security Test Description</th><td>To perform passive security testing using OWASP ZAP Baseline Scan, which analyzes HTTP responses, headers, cookies, and configurations to identify common security vulnerabilities such as missing security headers, insecure cookies, and information disclosure issues without actively attacking the application.</td></tr>
+              </table>
 
               <h2>📏 SLA Configuration</h2>
               <table border='1'>
