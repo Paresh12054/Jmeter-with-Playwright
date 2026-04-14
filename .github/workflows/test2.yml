@@ -209,6 +209,14 @@ jobs:
           }' results.jtl >> agg.html
              echo "</table>" >> agg.html
 
+      - name: Evaluate Overall SLA Status
+        run: |
+          if grep -q ">FAIL<" agg.html; then
+          echo "OVERALL_STATUS=FAIL" >> $GITHUB_ENV
+          else
+          echo "OVERALL_STATUS=SUCCESS" >> $GITHUB_ENV
+          fi
+
       - name: Extract Duration from JTL
         run: |
           START=$(awk -F',' 'NR==2 {print $1}' results.jtl)
@@ -354,15 +362,15 @@ jobs:
               const srNo = count + 1;
 
               // ✅ Status
-              const status = (process.env.SOME_FLAG === "FAIL")
+              const status = process.env.OVERALL_STATUS === "FAIL"
               ? `<ac:structured-macro ac:name="status">
-               <ac:parameter ac:name="colour">Red</ac:parameter>
-               <ac:parameter ac:name="title">FAIL</ac:parameter>
-               </ac:structured-macro>`
+              <ac:parameter ac:name="colour">Red</ac:parameter>
+              <ac:parameter ac:name="title">FAIL</ac:parameter>
+              </ac:structured-macro>`
               : `<ac:structured-macro ac:name="status">
-               <ac:parameter ac:name="colour">Green</ac:parameter>
-               <ac:parameter ac:name="title">SUCCESS</ac:parameter>
-               </ac:structured-macro>`;
+              <ac:parameter ac:name="colour">Green</ac:parameter>
+              <ac:parameter ac:name="title">SUCCESS</ac:parameter>
+              </ac:structured-macro>`;
 
               const row = `
               <tr>
