@@ -461,9 +461,33 @@ jobs:
               html = html.includes("</tbody>")
               ? html.replace("</tbody>", row + "</tbody>")
               : html + `<table><tbody>
-              <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Status</th></tr>
+              <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Avg (ms)</th><th>P90 (ms)</th><th>Status</th></tr>
               ${row}
               </tbody></table>`;
+              
+              // ✅ Auto re-number Sr.No
+              let counter = 1;
+
+              html = html.replace(
+              /<tbody>([\s\S]*?)<\/tbody>/,
+              (match, tbodyContent) => {
+              const updatedRows = tbodyContent.replace(/<tr>([\s\S]*?)<\/tr>/g, (rowMatch) => {
+
+              // Skip header row
+              if (rowMatch.includes("<th>")) return rowMatch;
+
+              // Replace first <td> (Sr.No)
+              const updatedRow = rowMatch.replace(
+              /<td>.*?<\/td>/,
+              `<td>${counter++}</td>`
+              );
+
+              return updatedRow;
+              });
+
+              return `<tbody>${updatedRows}</tbody>`;
+              }
+              );
 
               // ✅ Update parent page
               await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
