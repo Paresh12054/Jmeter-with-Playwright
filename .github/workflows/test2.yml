@@ -255,7 +255,7 @@ jobs:
             avg_all = int(sum_all/total_all)
             err_all = (total_all > 0) ? (fail_all/total_all)*100 : 0
     
-            printf "<tr style='font-weight:bold;background:#f2f2f2'>"
+            printf "<tr style=\"font-weight:bold;background:#f2f2f2\">"
             printf "<td>TOTAL</td>"
             printf "<td>%d</td>", total_all
             printf "<td>%d</td>", avg_all
