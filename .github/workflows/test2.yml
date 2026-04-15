@@ -283,13 +283,12 @@ jobs:
         run: |
           echo "Calling OpenAI for analysis..."
 
-          JTL_DATA=$(cat jtl_sample.txt)
-          
+                 
           RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
             -H "Content-Type: application/json" \
             -d "$(jq -n \
-            --arg data "$JTL_DATA" \
+            --rawfile data jtl_sample.txt \
             '{
           model: "gpt-4o-mini",
           messages: [
@@ -299,7 +298,7 @@ jobs:
             },
             {
               role: "user",
-              content: ("Analyze the following JMeter results and return STRICT JSON only.\n\nFormat:\n{\n\"summary\": \"...\",\n\"observations\": \"...\",\n\"sla_status\": \"...\",\n\"recommendations\": \"...\"\n}\n\nRules:\n- Always include all keys\n- Do NOT return null\n- Keep observations concise and actionable\n\nJMeter Data:\n\($data)") 
+              content: ("Analyze the following JMeter results and return STRICT JSON only.\n\nFormat:\n{\n\"summary\": \"...\",\n\"observations\": \"...\",\n\"sla_status\": \"...\",\n\"recommendations\": \"...\"\n}\n\nRules:\n- Always include all keys\n- Do NOT return null\n- Keep observations concise and actionable\n\nJMeter Data:\n\($data)")
             }
           ],
           temperature: 0.2
