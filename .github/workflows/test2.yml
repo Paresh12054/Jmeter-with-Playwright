@@ -299,7 +299,7 @@ jobs:
             },
             {
               role: "user",
-              content: "Analyze the following JMeter results and return STRICT JSON only.\n\nFormat:\n{\n\"summary\": \"...\",\n\"observations\": \"...\",\n\"sla_status\": \"...\",\n\"recommendations\": \"...\"\n}\n\nRules:\n- Always include all keys\n- Do NOT return null\n\nJMeter Data:\n" + $data
+              content: ("Analyze the following JMeter results and return STRICT JSON only.\n\nFormat:\n{\n\"summary\": \"...\",\n\"observations\": \"...\",\n\"sla_status\": \"...\",\n\"recommendations\": \"...\"\n}\n\nRules:\n- Always include all keys\n- Do NOT return null\n- Keep observations concise and actionable\n\nJMeter Data:\n\($data)") 
             }
           ],
           temperature: 0.2
