@@ -300,15 +300,14 @@ jobs:
             - Keep observations concise and actionable
 
             JMeter Data:
-            $(cat jtl_sample.txt)
-              EOF
+            EOF
             )
+              PROMPT="$PROMPT $(cat jtl_sample.txt)"
 
             RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n \
-              --arg prompt "$PROMPT" \
+            -d "$(jq -n --arg prompt "$PROMPT" \
             '{
             model: "gpt-4o-mini",
             messages: [
