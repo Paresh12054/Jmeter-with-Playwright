@@ -100,6 +100,15 @@ jobs:
         run: |
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
 
+      - name: Prepare JTL for AI
+        run: |
+          echo "Preparing JTL sample for AI..."
+
+          # limit size to avoid token issues
+          cut -d',' -f1-8 results.jtl | head -n 2000 > jtl_sample.txt
+
+          echo "JTL sample ready"
+
       - name: Run OWASP ZAP Baseline Scan
         run: |
           docker run --rm \
@@ -267,6 +276,39 @@ jobs:
             }' results.jtl >> agg.html
              echo "</table>" >> agg.html
 
+      - name: Analyze with OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "Calling OpenAI for analysis..."
+
+          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+          -H "Authorization: Bearer $OPENAI_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"model\": \"gpt-4o-mini\",
+            \"messages\": [
+          {
+            \"role\": \"system\",
+            \"content\": \"You are a performance testing expert. Analyze JMeter results and provide summary, key observations, SLA status, and recommendations in clean HTML format for Confluence.\"
+          },
+          {
+            \"role\": \"user\",
+            \"content\": \"Analyze this JMeter results sample:\\n$(cat jtl_sample.txt)\"
+          }
+          ]
+          }")
+
+          echo "$RESPONSE" > ai_response.json
+
+          AI_OUTPUT=$(jq -r '.choices[0].message.content' ai_response.json)
+
+          echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV
+          echo "$AI_OUTPUT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          echo "AI analysis completed"
+
       - name: Extract TOTAL Metrics
         run: |
           TOTAL_ROW=$(grep "TOTAL" agg.html)
@@ -393,8 +435,8 @@ jobs:
               <h2>🔐 Security Summary</h2>
               ${zapSummary}
 
-              <h2>📝 Observations</h2>
-              <p><i>Add observations, bottlenecks, and recommendations here.</i></p>
+              <h2>🧠 AI Analysis & Observations</h2>
+              ${process.env.AI_SUMMARY}
 
               <h2>📎 Attachments</h2>
               <ac:structured-macro ac:name="attachments"/>`;
