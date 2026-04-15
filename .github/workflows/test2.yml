@@ -102,10 +102,11 @@ jobs:
 
       - name: Prepare JTL for AI
         run: |
-          echo "Preparing JTL sample for AI..."
+         echo "Preparing JTL sample for AI..."
 
-          # limit size to avoid token issues
-          cut -d',' -f1-8 results.jtl | head -n 2000 > jtl_sample.txt
+          # keep header + data
+          head -n 1 results.jtl > jtl_sample.txt
+          cut -d',' -f1-8 results.jtl | tail -n 2000 >> jtl_sample.txt
 
           echo "JTL sample ready"
 
@@ -278,36 +279,83 @@ jobs:
 
       - name: Analyze with OpenAI
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "Calling OpenAI for analysis..."
+
+          PROMPT=$(cat <<EOF
+          Analyze the following JMeter results and return STRICT JSON only.
+
+          Format:
+          {
+          "summary": "...",
+          "observations": "...",
+          "sla_status": "...",
+          "recommendations": "..."
+          }
+
+          Rules:
+          - Always include all keys
+          - Do NOT return null
+          - Keep observations concise and actionable
+
+          JMeter Data:
+          $(cat jtl_sample.txt)
+            EOF
+          )
 
           RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
           -H "Authorization: Bearer $OPENAI_API_KEY" \
           -H "Content-Type: application/json" \
-          -d "{
-            \"model\": \"gpt-4o-mini\",
-            \"messages\": [
-          {
-            \"role\": \"system\",
-            \"content\": \"You are a performance testing expert. Analyze JMeter results and provide summary, key observations, SLA status, and recommendations in clean HTML format for Confluence.\"
-          },
-          {
-            \"role\": \"user\",
-            \"content\": \"Analyze this JMeter results sample:\\n$(cat jtl_sample.txt)\"
-          }
-          ]
-          }")
+          -d "$(jq -n \
+            --arg prompt "$PROMPT" \
+            '{
+          model: "gpt-4o-mini",
+          messages: [
+            {role: "system", content: "You are a performance testing expert."},
+            {role: "user", content: $prompt}
+          ],
+          temperature: 0.2
+          }')")
 
           echo "$RESPONSE" > ai_response.json
 
-          AI_OUTPUT=$(jq -r '.choices[0].message.content' ai_response.json)
+          echo "Raw AI response:"
+          cat ai_response.json
+
+          # Extract JSON safely
+          AI_CONTENT=$(jq -r '.choices[0].message.content' ai_response.json)
+
+          echo "$AI_CONTENT" > parsed_ai.json
+
+          # Validate JSON (prevents null issues)
+          if ! jq empty parsed_ai.json 2>/dev/null; then
+            echo "AI returned invalid JSON. Failing pipeline."
+            exit 1
+          fi
+
+          SUMMARY=$(jq -r '.summary' parsed_ai.json)
+          OBSERVATIONS=$(jq -r '.observations' parsed_ai.json)
+          SLA=$(jq -r '.sla_status' parsed_ai.json)
+          RECOMMENDATIONS=$(jq -r '.recommendations' parsed_ai.json)
 
           echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV
-          echo "$AI_OUTPUT" >> $GITHUB_ENV
+          echo "$SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-          echo "AI analysis completed"
+          echo "AI_OBSERVATIONS<<EOF" >> $GITHUB_ENV
+          echo "$OBSERVATIONS" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          echo "AI_SLA<<EOF" >> $GITHUB_ENV
+          echo "$SLA" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          echo "AI_RECOMMENDATIONS<<EOF" >> $GITHUB_ENV
+          echo "$RECOMMENDATIONS" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          echo "AI analysis completed successfully"
 
       - name: Extract TOTAL Metrics
         run: |
