@@ -279,83 +279,83 @@ jobs:
 
       - name: Analyze with OpenAI
         env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          echo "Calling OpenAI for analysis..."
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+         run: |
+            echo "Calling OpenAI for analysis..."
 
-          PROMPT=$(cat <<EOF
-          Analyze the following JMeter results and return STRICT JSON only.
+            PROMPT=$(cat <<EOF
+            Analyze the following JMeter results and return STRICT JSON only.
 
-          Format:
-          {
-          "summary": "...",
-          "observations": "...",
-          "sla_status": "...",
-          "recommendations": "..."
-          }
+            Format:
+            {
+            "summary": "...",
+            "observations": "...",
+            "sla_status": "...",
+            "recommendations": "..."
+              }
 
-          Rules:
-          - Always include all keys
-          - Do NOT return null
-          - Keep observations concise and actionable
+            Rules:
+            - Always include all keys
+            - Do NOT return null
+            - Keep observations concise and actionable
 
-          JMeter Data:
-          $(cat jtl_sample.txt)
-            EOF
-          )
+            JMeter Data:
+            $(cat jtl_sample.txt)
+              EOF
+            )
 
-          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
-          -H "Authorization: Bearer $OPENAI_API_KEY" \
-          -H "Content-Type: application/json" \
-          -d "$(jq -n \
-            --arg prompt "$PROMPT" \
+            RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg prompt "$PROMPT" \
             '{
-          model: "gpt-4o-mini",
-          messages: [
+            model: "gpt-4o-mini",
+            messages: [
             {role: "system", content: "You are a performance testing expert."},
             {role: "user", content: $prompt}
-          ],
-          temperature: 0.2
-          }')")
+                    ],
+              temperature: 0.2
+            }')")
 
-          echo "$RESPONSE" > ai_response.json
+            echo "$RESPONSE" > ai_response.json
 
-          echo "Raw AI response:"
-          cat ai_response.json
+            echo "Raw AI response:"
+            cat ai_response.json
 
-          # Extract JSON safely
-          AI_CONTENT=$(jq -r '.choices[0].message.content' ai_response.json)
+            # Extract JSON safely
+            AI_CONTENT=$(jq -r '.choices[0].message.content' ai_response.json)
+  
+            echo "$AI_CONTENT" > parsed_ai.json
 
-          echo "$AI_CONTENT" > parsed_ai.json
-
-          # Validate JSON (prevents null issues)
-          if ! jq empty parsed_ai.json 2>/dev/null; then
+            # Validate JSON (prevents null issues)
+            if ! jq empty parsed_ai.json 2>/dev/null; then
             echo "AI returned invalid JSON. Failing pipeline."
-            exit 1
-          fi
+              exit 1
+            fi
 
-          SUMMARY=$(jq -r '.summary' parsed_ai.json)
-          OBSERVATIONS=$(jq -r '.observations' parsed_ai.json)
-          SLA=$(jq -r '.sla_status' parsed_ai.json)
-          RECOMMENDATIONS=$(jq -r '.recommendations' parsed_ai.json)
+            SUMMARY=$(jq -r '.summary' parsed_ai.json)
+            OBSERVATIONS=$(jq -r '.observations' parsed_ai.json)
+            SLA=$(jq -r '.sla_status' parsed_ai.json)
+            RECOMMENDATIONS=$(jq -r '.recommendations' parsed_ai.json)
 
-          echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV
-          echo "$SUMMARY" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+            echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV
+            echo "$SUMMARY" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
 
-          echo "AI_OBSERVATIONS<<EOF" >> $GITHUB_ENV
-          echo "$OBSERVATIONS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+            echo "AI_OBSERVATIONS<<EOF" >> $GITHUB_ENV
+            echo "$OBSERVATIONS" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
 
-          echo "AI_SLA<<EOF" >> $GITHUB_ENV
-          echo "$SLA" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+            echo "AI_SLA<<EOF" >> $GITHUB_ENV
+            echo "$SLA" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
 
-          echo "AI_RECOMMENDATIONS<<EOF" >> $GITHUB_ENV
-          echo "$RECOMMENDATIONS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+            echo "AI_RECOMMENDATIONS<<EOF" >> $GITHUB_ENV
+            echo "$RECOMMENDATIONS" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
 
-          echo "AI analysis completed successfully"
+            echo "AI analysis completed successfully"
 
       - name: Extract TOTAL Metrics
         run: |
