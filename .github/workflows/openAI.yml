@@ -1,0 +1,20 @@
+name: OpenAI Connectivity Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-openai:
+    runs-on: ubuntu-latest
+
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - name: Test OpenAI Key
+        run: |
+          echo "Testing OpenAI connectivity..."
+
+          curl -s https://api.openai.com/v1/models \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: application/json"
