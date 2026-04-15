@@ -280,8 +280,8 @@ jobs:
       - name: Analyze with OpenAI
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-         run: |
-            echo "Calling OpenAI for analysis..."
+        run: |
+          echo "Calling OpenAI for analysis..."
 
             PROMPT=$(cat <<EOF
             Analyze the following JMeter results and return STRICT JSON only.
