@@ -102,7 +102,7 @@ jobs:
 
       - name: Prepare JTL for AI
         run: |
-         echo "Preparing JTL sample for AI..."
+          echo "Preparing JTL sample for AI..."
 
           # keep header + data
           head -n 1 results.jtl > jtl_sample.txt
@@ -305,11 +305,7 @@ jobs:
             }')")
   
             echo "$RESPONSE" > ai_response.json
-            echo "AI analysis completed"
-            }')")
-
-            echo "$RESPONSE" > ai_response.json
-
+                       
             echo "Raw AI response:"
             cat ai_response.json
 
@@ -317,8 +313,8 @@ jobs:
             echo "$AI_CONTENT" > parsed_ai.json
 
             if ! jq empty parsed_ai.json 2>/dev/null; then
-            echo "AI returned invalid JSON. Failing pipeline."
-            exit 1
+              echo "AI returned invalid JSON. Failing pipeline."
+              exit 1
             fi
 
           SUMMARY=$(jq -r '.summary' parsed_ai.json)
