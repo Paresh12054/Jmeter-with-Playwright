@@ -16,13 +16,11 @@ jobs:
           echo "Listing reports folder:"
           ls -l reports
 
-      - name: Send JTL to OpenAI
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Prepare request file
         run: |
           echo "Preparing request..."
 
-          REQUEST_JSON=$(jq -n \
+          jq -n \
             --rawfile data reports/results.jtl \
             --arg system_msg "You are a performance testing expert." \
             --arg user_msg "Analyze this JMeter results file and give summary and key observations." \
@@ -32,14 +30,21 @@ jobs:
                 {role: "system", content: $system_msg},
                 {role: "user", content: ($user_msg + "\n\nJMeter Data:\n" + $data)}
               ]
-            }')
+            }' > request.json
 
+          echo "Request file created"
+          ls -lh request.json
+
+      - name: Send to OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
           echo "Sending request to OpenAI..."
 
           RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "$REQUEST_JSON")
+            --data-binary @request.json)
 
           echo "===== OPENAI RESPONSE ====="
           echo "$RESPONSE"
