@@ -298,8 +298,25 @@ jobs:
             },
             {
               role: "user",
-              content: ("Analyze the following JMeter results and return STRICT JSON only.\n\nFormat:\n{\n\"summary\": \"...\",\n\"observations\": \"...\",\n\"sla_status\": \"...\",\n\"recommendations\": \"...\"\n}\n\nRules:\n- Always include all keys\n- Do NOT return null\n- Keep observations concise and actionable\n\nJMeter Data:\n\($data)")
-            }
+              "content": ("Analyze the following JMeter results and return ONLY valid JSON.
+
+              IMPORTANT:
+              - Do NOT include any text before or after JSON
+              - Do NOT use markdown
+              - Output must be pure JSON
+
+              Format:
+              {
+                \"summary\": \"string\",
+                \"observations\": \"string\",
+                \"sla_status\": \"string\",
+                \"recommendations\": \"string\"
+              }
+
+              If data is unclear, still populate all fields with best possible insights.
+
+              JMeter Data:\n\($data)")
+              }
           ],
           temperature: 0.2
             }')")
@@ -310,18 +327,20 @@ jobs:
             cat ai_response.json
 
             AI_CONTENT=$(jq -r '.choices[0].message.content' ai_response.json)
-            echo "$AI_CONTENT" > parsed_ai.json
+            echo "$AI_CONTENT" | sed -n '/{/,/}/p' > parsed_ai.json
 
             if ! jq empty parsed_ai.json 2>/dev/null; then
               echo "AI returned invalid JSON. Failing pipeline."
               exit 1
             fi
 
-          SUMMARY=$(jq -r '.summary' parsed_ai.json)
-          OBSERVATIONS=$(jq -r '.observations' parsed_ai.json)
-          SLA=$(jq -r '.sla_status' parsed_ai.json)
-          RECOMMENDATIONS=$(jq -r '.recommendations' parsed_ai.json)
-
+          SUMMARY=$(jq -r '.summary // "No summary generated"' parsed_ai.json)
+          OBSERVATIONS=$(jq -r '.observations // "No observations generated"' parsed_ai.json)
+          SLA=$(jq -r '.sla_status // "Unknown"' parsed_ai.json)
+          RECOMMENDATIONS=$(jq -r '.recommendations // "No recommendations generated"' parsed_ai.json)
+          
+          echo "===== AI RAW CONTENT ====="
+          echo "$AI_CONTENT"
           echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV
           echo "$SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
