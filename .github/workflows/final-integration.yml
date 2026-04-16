@@ -382,17 +382,20 @@ jobs:
 
       - name: Download Previous Metrics
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: metrics
-          path: prev || true
+          path: prev
 
       - name: Load Previous Metrics
         run: |
-          if [ -f prev/current_metrics.json ]; then
+          if [ -d "prev" ] && [ -f "prev/current_metrics.json" ]; then
+          echo "Previous metrics found ✅"
           PREV_AVG=$(jq '.avg' prev/current_metrics.json)
           PREV_P90=$(jq '.p90' prev/current_metrics.json)
           HAS_PREV=true
           else
+          echo "No previous metrics found. First run."
           PREV_AVG=0
           PREV_P90=0
           HAS_PREV=false
@@ -402,6 +405,13 @@ jobs:
           echo "PREV_P90=$PREV_P90" >> $GITHUB_ENV
           echo "HAS_PREV=$HAS_PREV" >> $GITHUB_ENV
 
+      - name: Upload Current Metrics for Next Run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics
+          path: current_metrics.json
+          
       - name: Calculate Deviation
         run: |
           if [ "$HAS_PREV" = "false" ]; then
