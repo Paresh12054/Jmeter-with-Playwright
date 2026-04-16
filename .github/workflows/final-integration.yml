@@ -373,6 +373,65 @@ jobs:
           echo "TOTAL_AVG=$TOTAL_AVG" >> $GITHUB_ENV
           echo "TOTAL_P90=$TOTAL_P90" >> $GITHUB_ENV
 
+      - name: Save Current Metrics JSON
+        run: |
+          echo "{
+            \"avg\": $TOTAL_AVG,
+            \"p90\": $TOTAL_P90
+          }" > current_metrics.json
+
+      - name: Download Previous Metrics
+        uses: actions/download-artifact@v4
+        with:
+          name: metrics
+          path: prev || true
+
+      - name: Load Previous Metrics
+        run: |
+          if [ -f prev/current_metrics.json ]; then
+          PREV_AVG=$(jq '.avg' prev/current_metrics.json)
+          PREV_P90=$(jq '.p90' prev/current_metrics.json)
+          HAS_PREV=true
+          else
+          PREV_AVG=0
+          PREV_P90=0
+          HAS_PREV=false
+          fi
+
+          echo "PREV_AVG=$PREV_AVG" >> $GITHUB_ENV
+          echo "PREV_P90=$PREV_P90" >> $GITHUB_ENV
+          echo "HAS_PREV=$HAS_PREV" >> $GITHUB_ENV
+
+      - name: Calculate Deviation
+        run: |
+          if [ "$HAS_PREV" = "false" ]; then
+          echo "DEV_AVG=0" >> $GITHUB_ENV
+          echo "DEV_P90=0" >> $GITHUB_ENV
+          echo "AVG_COLOR=Grey" >> $GITHUB_ENV
+          echo "P90_COLOR=Grey" >> $GITHUB_ENV
+          echo "DEV_LABEL=N/A" >> $GITHUB_ENV
+          else
+          DEV_AVG=$((TOTAL_AVG - PREV_AVG))
+          DEV_P90=$((TOTAL_P90 - PREV_P90))
+
+          echo "DEV_AVG=$DEV_AVG" >> $GITHUB_ENV
+          echo "DEV_P90=$DEV_P90" >> $GITHUB_ENV
+
+          if [ "$DEV_AVG" -lt 0 ]; then
+            echo "AVG_COLOR=Green" >> $GITHUB_ENV
+          else
+            echo "AVG_COLOR=Red" >> $GITHUB_ENV
+          fi
+
+          if [ "$DEV_P90" -lt 0 ]; then
+            echo "P90_COLOR=Green" >> $GITHUB_ENV
+          else
+            echo "P90_COLOR=Red" >> $GITHUB_ENV
+          fi
+
+            echo "DEV_LABEL=${DEV_AVG} ms" >> $GITHUB_ENV
+          fi
+
       - name: Evaluate Overall SLA Status
         run: |
           if grep -q ">FAIL<" agg.html; then
@@ -479,6 +538,45 @@ jobs:
 
               <h2>📈 Transaction-Level Aggregate</h2>
               ${fs.readFileSync('agg.html')}
+
+              <h2>📊 Performance Comparison (vs Previous Run)</h2>
+
+              ${process.env.HAS_PREV === "false" 
+              ? `<p><i>Baseline established in this run. Comparison will be available from next execution.</i></p>` 
+              : ""}
+              
+              <table border='1'>
+              <tr>
+                <th>Metric</th>
+                <th>Previous</th>
+                <th>Current</th>
+                <th>Deviation</th>
+              </tr>
+
+              <tr>
+                <td>Avg (ms)</td>
+                <td>${process.env.PREV_AVG}</td>
+                <td>${process.env.TOTAL_AVG}</td>
+                <td>
+                <ac:structured-macro ac:name="status">
+                <ac:parameter ac:name="colour">${process.env.AVG_COLOR}</ac:parameter>
+                <ac:parameter ac:name="title">${process.env.DEV_AVG}</ac:parameter>
+                </ac:structured-macro>
+                </td>
+              </tr>
+
+              <tr>
+                <td>P90 (ms)</td>
+                <td>${process.env.PREV_P90}</td>
+                <td>${process.env.TOTAL_P90}</td>
+                <td>
+                <ac:structured-macro ac:name="status">
+                <ac:parameter ac:name="colour">${process.env.P90_COLOR}</ac:parameter>
+                <ac:parameter ac:name="title">${process.env.DEV_P90}</ac:parameter>
+                </ac:structured-macro>
+                </td>
+              </tr>
+              </table>
   
               <h2>🎭 Playwright Summary</h2>
               <table border='1'>
@@ -543,6 +641,13 @@ jobs:
               <ac:parameter ac:name="title">SUCCESS</ac:parameter>
               </ac:structured-macro>`;
 
+              const deviationCell = process.env.HAS_PREV === "false"
+              ? "N/A"
+              : `<ac:structured-macro ac:name="status">
+              <ac:parameter ac:name="colour">${process.env.AVG_COLOR}</ac:parameter>
+              <ac:parameter ac:name="title">${process.env.DEV_AVG} ms</ac:parameter>
+              </ac:structured-macro>`;
+
               const row = `
               <tr>
               <td>${srNo}</td>
@@ -551,13 +656,14 @@ jobs:
               <td>${process.env.TOTAL_AVG} ms</td>
               <td>${process.env.TOTAL_P90} ms</td>
               <td>${status}</td>
+              <td>${deviationCell}</td>
               </tr>`;
 
               // ✅ Append row safely
               html = html.includes("</tbody>")
               ? html.replace("</tbody>", row + "</tbody>")
               : html + `<table><tbody>
-              <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Avg (ms)</th><th>P90 (ms)</th><th>Status</th></tr>
+              <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Avg (ms)</th><th>P90 (ms)</th><th>Status</th><th>Deviation (Avg)</th></tr>
               ${row}
               </tbody></table>`;
               
@@ -628,3 +734,8 @@ jobs:
               [ -f "$f" ] && upload "$f"
             done
           fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: metrics
+          path: current_metrics.json
