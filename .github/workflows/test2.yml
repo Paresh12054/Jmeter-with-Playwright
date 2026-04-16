@@ -341,6 +341,7 @@ jobs:
           
           echo "===== AI RAW CONTENT ====="
           echo "$AI_CONTENT"
+
           echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV
           echo "$SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -356,6 +357,9 @@ jobs:
           echo "AI_RECOMMENDATIONS<<EOF" >> $GITHUB_ENV
           echo "$RECOMMENDATIONS" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
+          
+          echo "===== FULL API RESPONSE ====="
+          cat ai_response.json
 
           echo "AI analysis completed successfully"
 
