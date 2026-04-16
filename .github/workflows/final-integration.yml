@@ -596,7 +596,7 @@ jobs:
 
               <tr>
                 <td>P90 (ms)</td>
-                <td><td>${process.env.HAS_PREV === "false" ? "N/A" : process.env.PREV_P90}</td></td>
+                <td>${process.env.HAS_PREV === "false" ? "N/A" : process.env.PREV_P90}</td>
                 <td>${process.env.TOTAL_P90}</td>
                 <td>
                 <ac:structured-macro ac:name="status">
