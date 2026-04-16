@@ -1,20 +1,45 @@
-name: OpenAI Connectivity Test
+name: JTL Analysis Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  test-openai:
+  analyze-jtl:
     runs-on: ubuntu-latest
 
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
     steps:
-      - name: Test OpenAI Key
-        run: |
-          echo "Testing OpenAI connectivity..."
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-          curl -s https://api.openai.com/v1/models \
+      - name: Verify JTL file exists
+        run: |
+          echo "Listing reports folder:"
+          ls -l reports
+
+      - name: Send JTL to OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "Preparing request..."
+
+          REQUEST_JSON=$(jq -n \
+            --rawfile data reports/results.jtl \
+            --arg system_msg "You are a performance testing expert." \
+            --arg user_msg "Analyze this JMeter results file and give summary and key observations." \
+            '{
+              model: "gpt-4o-mini",
+              messages: [
+                {role: "system", content: $system_msg},
+                {role: "user", content: ($user_msg + "\n\nJMeter Data:\n" + $data)}
+              ]
+            }')
+
+          echo "Sending request to OpenAI..."
+
+          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
-            -H "Content-Type: application/json"
+            -H "Content-Type: application/json" \
+            -d "$REQUEST_JSON")
+
+          echo "===== OPENAI RESPONSE ====="
+          echo "$RESPONSE"
