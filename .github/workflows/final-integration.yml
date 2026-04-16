@@ -441,15 +441,13 @@ jobs:
 
               const parentId = "6094858";
               const indexPageId = "6094858";
-
+              
               const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
               const headers = {
               "Authorization": `Basic ${auth}`,
               "Content-Type": "application/json"
                };
-
-              const now = new Date().toLocaleString("en-GB").replace(",", "");
 
               async function api(url, method = "GET", body = null) {
               const res = await fetch(url, {
@@ -463,6 +461,14 @@ jobs:
 
               return text ? JSON.parse(text) : {};
               }
+
+              const now = new Date().toLocaleString("en-GB").replace(",", "");
+              
+              const parent = await api(
+              `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
+              );
+
+              let html = parent.body.storage.value;
 
               // ✅ Extract previous run metrics from parent page
               
@@ -639,11 +645,7 @@ jobs:
               const link = child._links.base + child._links.webui;
 
                 // ✅ Fetch parent page
-              const parent = await api(
-              `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
-              );
-
-              let html = parent.body.storage.value;
+              
 
               // ✅ Sr.No calculation
               let match = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
