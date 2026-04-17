@@ -12,21 +12,23 @@ jobs:
       AMPLIFY_BASE_URL: https://amplify.planittesting.com
 
     steps:
-      - name: Test Amplify API Connection
+      - name: Validate Amplify API Connectivity
         run: |
-          echo "Testing Amplify connectivity..."
+          echo "Checking Amplify endpoint availability..."
 
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "${AMPLIFY_BASE_URL}" \
-            -H "x-api-key: ${AMPLIFY_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d '{}')
+          STATUS=$(curl -s -o response.txt -w "%{http_code}" \
+          -X POST "${AMPLIFY_BASE_URL}/external/api/completion_prompt" \
+          -H "Authorization: Bearer ${AMPLIFY_API_KEY}" \
+          -H "Content-Type: application/json" \
+          -d '{}')
 
-          echo "HTTP Status: $RESPONSE"
+          echo "HTTP Status: $STATUS"
+          echo "Response:"
+            cat response.txt
 
-          if [ "$RESPONSE" = "200" ]; then
-            echo "✅ Amplify connection successful"
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "400" ]; then
+          echo "✅ Amplify endpoint is reachable"
           else
-            echo "❌ Amplify connection failed"
-            exit 1
+          echo "❌ Amplify connectivity failed"
+          exit 1
           fi
