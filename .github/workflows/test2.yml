@@ -1,4 +1,4 @@
-name: Test2
+name: Final Integration with OpenAI
 
 on:
   workflow_dispatch:
@@ -373,6 +373,37 @@ jobs:
           echo "TOTAL_AVG=$TOTAL_AVG" >> $GITHUB_ENV
           echo "TOTAL_P90=$TOTAL_P90" >> $GITHUB_ENV
 
+                     
+      - name: Calculate Deviation
+        run: |
+          if [ "$HAS_PREV" = "false" ]; then
+          echo "DEV_AVG=0" >> $GITHUB_ENV
+          echo "DEV_P90=0" >> $GITHUB_ENV
+          echo "AVG_COLOR=Grey" >> $GITHUB_ENV
+          echo "P90_COLOR=Grey" >> $GITHUB_ENV
+          echo "DEV_LABEL=N/A" >> $GITHUB_ENV
+          else
+          DEV_AVG=$((TOTAL_AVG - PREV_AVG))
+          DEV_P90=$((TOTAL_P90 - PREV_P90))
+
+          echo "DEV_AVG=$DEV_AVG" >> $GITHUB_ENV
+          echo "DEV_P90=$DEV_P90" >> $GITHUB_ENV
+
+          if [ "$DEV_AVG" -lt 0 ]; then
+            echo "AVG_COLOR=Green" >> $GITHUB_ENV
+          else
+            echo "AVG_COLOR=Red" >> $GITHUB_ENV
+          fi
+
+          if [ "$DEV_P90" -lt 0 ]; then
+            echo "P90_COLOR=Green" >> $GITHUB_ENV
+          else
+            echo "P90_COLOR=Red" >> $GITHUB_ENV
+          fi
+
+            echo "DEV_LABEL=${DEV_AVG} ms" >> $GITHUB_ENV
+          fi
+
       - name: Evaluate Overall SLA Status
         run: |
           if grep -q ">FAIL<" agg.html; then
@@ -410,15 +441,13 @@ jobs:
 
               const parentId = "6094858";
               const indexPageId = "6094858";
-
+              
               const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
               const headers = {
               "Authorization": `Basic ${auth}`,
               "Content-Type": "application/json"
                };
-
-              const now = new Date().toLocaleString("en-GB").replace(",", "");
 
               async function api(url, method = "GET", body = null) {
               const res = await fetch(url, {
@@ -432,6 +461,63 @@ jobs:
 
               return text ? JSON.parse(text) : {};
               }
+
+              const now = new Date().toLocaleString("en-GB").replace(",", "");
+              
+              const parent = await api(
+              `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
+              );
+
+              let html = parent.body.storage.value;
+
+              // ✅ Extract previous run metrics from parent page
+              
+              let prevAvg = 0;
+              let prevP90 = 0;
+              let hasPrev = false;
+
+              const tableMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
+
+              if (tableMatch && tableMatch[1]) {
+              const rows = tableMatch[1].match(/<tr>([\s\S]*?)<\/tr>/g);
+
+              if (rows && rows.length > 1) {
+              const lastRow = rows[rows.length - 1];
+              const cols = lastRow.match(/<td>(.*?)<\/td>/g);
+
+              if (cols && cols.length >= 5) {
+              prevAvg = parseInt(cols[3].replace(/<[^>]+>/g, ''));
+              prevP90 = parseInt(cols[4].replace(/<[^>]+>/g, ''));
+              hasPrev = true;
+              }
+              }
+              }
+
+              // Deviation
+              let devAvg = 0;
+              let devP90 = 0;
+              let avgColor = "Grey";
+              let p90Color = "Grey";
+              let percentChange = 0;
+
+              if (hasPrev && prevAvg > 0) {
+              devAvg = process.env.TOTAL_AVG - prevAvg;
+              devP90 = process.env.TOTAL_P90 - prevP90;
+
+              avgColor = devAvg < 0 ? "Green" : "Red";
+              p90Color = devP90 < 0 ? "Green" : "Red";
+
+              percentChange = ((devAvg / prevAvg) * 100).toFixed(2);
+              }
+
+              process.env.PREV_AVG = prevAvg;
+              process.env.PREV_P90 = prevP90;
+              process.env.HAS_PREV = hasPrev;
+              process.env.DEV_AVG = devAvg;
+              process.env.DEV_P90 = devP90;
+              process.env.AVG_COLOR = avgColor;
+              process.env.P90_COLOR = p90Color;
+              process.env.PERCENT_CHANGE = percentChange;
 
               // ✅ Playwright summary rows
               const pwRows = fs.readFileSync('pw_runs_summary.txt')
@@ -479,6 +565,51 @@ jobs:
 
               <h2>📈 Transaction-Level Aggregate</h2>
               ${fs.readFileSync('agg.html')}
+
+              <h2>📊 Performance Comparison (vs Previous Run)</h2>
+
+              ${process.env.HAS_PREV === "false" 
+              ? `<p><i>Baseline established in this run. Comparison will be available from next execution.</i></p>` 
+              : ""}
+              
+              <table border='1'>
+              <tr>
+                <th>Metric</th>
+                <th>Previous</th>
+                <th>Current</th>
+                <th>Deviation</th>
+              </tr>
+
+              <tr>
+                <td>Avg (ms)</td>
+                <td>${process.env.HAS_PREV === "false" ? "N/A" : process.env.PREV_AVG}</td>
+                <td>${process.env.TOTAL_AVG}</td>
+                <td>
+                <ac:structured-macro ac:name="status">
+                <ac:parameter ac:name="colour">${process.env.AVG_COLOR}</ac:parameter>
+                <ac:parameter ac:name="title">${process.env.HAS_PREV === "false"
+                ? "N/A"
+                : `${process.env.DEV_AVG} ms (${process.env.PERCENT_CHANGE}%)`}</ac:parameter>
+                </ac:structured-macro>
+                </td>
+              </tr>
+
+              <tr>
+                <td>P90 (ms)</td>
+                <td>${process.env.HAS_PREV === "false" ? "N/A" : process.env.PREV_P90}</td>
+                <td>${process.env.TOTAL_P90}</td>
+                <td>
+                <ac:structured-macro ac:name="status">
+                <ac:parameter ac:name="colour">${process.env.P90_COLOR}</ac:parameter>
+                <ac:parameter ac:name="title">
+                ${process.env.HAS_PREV === "false"
+                ? "N/A"
+                : `${process.env.DEV_P90} ms`}
+                </ac:parameter>
+                </ac:structured-macro>
+                </td>
+              </tr>
+              </table>
   
               <h2>🎭 Playwright Summary</h2>
               <table border='1'>
@@ -514,11 +645,7 @@ jobs:
               const link = child._links.base + child._links.webui;
 
                 // ✅ Fetch parent page
-              const parent = await api(
-              `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
-              );
-
-              let html = parent.body.storage.value;
+              
 
               // ✅ Sr.No calculation
               let match = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
@@ -543,6 +670,13 @@ jobs:
               <ac:parameter ac:name="title">SUCCESS</ac:parameter>
               </ac:structured-macro>`;
 
+              const deviationCell = process.env.HAS_PREV === "false"
+              ? "N/A"
+              : `<ac:structured-macro ac:name="status">
+              <ac:parameter ac:name="colour">${process.env.AVG_COLOR}</ac:parameter>
+              <ac:parameter ac:name="title">${process.env.DEV_AVG} ms (${process.env.PERCENT_CHANGE}%)</ac:parameter>
+              </ac:structured-macro>`;
+
               const row = `
               <tr>
               <td>${srNo}</td>
@@ -551,13 +685,14 @@ jobs:
               <td>${process.env.TOTAL_AVG} ms</td>
               <td>${process.env.TOTAL_P90} ms</td>
               <td>${status}</td>
+              <td>${deviationCell}</td>
               </tr>`;
 
               // ✅ Append row safely
               html = html.includes("</tbody>")
               ? html.replace("</tbody>", row + "</tbody>")
               : html + `<table><tbody>
-              <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Avg (ms)</th><th>P90 (ms)</th><th>Status</th></tr>
+              <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Avg (ms)</th><th>P90 (ms)</th><th>Status</th><th>Deviation (Avg)</th></tr>
               ${row}
               </tbody></table>`;
               
