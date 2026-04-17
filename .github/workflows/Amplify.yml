@@ -18,7 +18,7 @@ jobs:
 
           STATUS=$(curl -s -o response.txt -w "%{http_code}" \
           -X POST "${AMPLIFY_BASE_URL}/external/api/completion_prompt" \
-          -H "Authorization: Bearer ${AMPLIFY_API_KEY}" \
+          -H "x-api-key: ${AMPLIFY_API_KEY}" \
           -H "Content-Type: application/json" \
           -d '{}')
 
