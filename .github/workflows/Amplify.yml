@@ -16,10 +16,10 @@ jobs:
         run: |
           echo "Testing Amplify connectivity..."
 
-          STATUS=$(curl -s -o response.txt -w "%{http_code}"
-          -X POST "${AMPLIFY_BASE_URL}/external/api/completion_prompt"
-          -H "Authorization: Bearer ${AMPLIFY_TOKEN}"
-          -H "Content-Type: application/json"
+          STATUS=$(curl -s -o response.txt -w "%{http_code}" \
+          -X POST "${AMPLIFY_BASE_URL}/external/api/completion_prompt" \
+          -H "Authorization: Bearer ${AMPLIFY_TOKEN}" \
+          -H "Content-Type: application/json" \
           -d '{
           "prompt_id": "232e0124-928b-48d4-b06d-1be47fec90fc",
           "messages": [
