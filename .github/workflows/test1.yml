@@ -291,22 +291,15 @@ jobs:
             -d "$(jq -n \
             --rawfile data jtl_sample.txt \
             '{
-           prompt_id: "232e0124-928b-48d4-b06d-1be47fec90fc",
-           messages: [
-          {
-            role: "user",
-            content: ("You are a performance testing expert.
-
-            Analyze the following JMeter results and provide:
-
-            1. Summary
-            2. Observations
-            3. SLA Status
-            4. Recommendations
-
-          JMeter Data:
-          ($data)")
-          }
+            messages: [
+            {
+              role: "system",
+              content: "You are a performance testing expert. Analyze JMeter results and provide summary, observations, SLA status, and recommendations."
+            },
+            {
+              role: "user",
+              content: ("Analyze the following JMeter results:\n\n" + $data)
+            }
           ]
           }')")
 
@@ -314,9 +307,13 @@ jobs:
           echo "===== Amplify RAW RESPONSE =====" 
           cat amplify_response.json 
           # Try extracting response safely AI_OUTPUT=$(jq -r '.output // .response // .message // .' amplify_response.json) 
-          echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV 
-          echo "$AI_OUTPUT" >> $GITHUB_ENV 
-          echo "EOF" >> $GITHUB_ENV echo "AI analysis completed successfully"
+           AI_OUTPUT=$(jq -r '.assistant_resp // .output // .response // .' amplify_response.json)
+
+          echo "$AI_OUTPUT" > ai_summary.txt
+
+          echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV
+          cat ai_summary.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
         
       - name: Extract TOTAL Metrics
         run: |
