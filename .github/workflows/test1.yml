@@ -279,90 +279,45 @@ jobs:
 
       - name: Analyze with OpenAI
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AMPLIFY_TOKEN: ${{ secrets.AMPLIFY_TOKEN }}
+          AMPLIFY_BASE_URL: https://amplify.planittesting.com
         run: |
           echo "Calling OpenAI for analysis..."
-
                  
-          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
-            -H "Authorization: Bearer $OPENAI_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n \
-            --rawfile data jtl_sample.txt \
+          RESPONSE=$(curl -s
+            -X POST "${AMPLIFY_BASE_URL}/external/api/completion_prompt"
+            -H "token: ${AMPLIFY_TOKEN}"
+            -H "Content-Type: application/json"
+            -d "$(jq -n
+            --rawfile data jtl_sample.txt
             '{
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: "You are a performance testing expert."
-            },
-            {
-              role: "user",
-              "content": ("Analyze the following JMeter results and return ONLY valid JSON.
+           prompt_id: "232e0124-928b-48d4-b06d-1be47fec90fc",
+           messages: [
+          {
+            role: "user",
+            content: ("You are a performance testing expert.
 
-              IMPORTANT:
-              - Do NOT include any text before or after JSON
-              - Do NOT use markdown
-              - Output must be pure JSON
+            Analyze the following JMeter results and provide:
 
-              Format:
-              {
-                \"summary\": \"string\",
-                \"observations\": \"string\",
-                \"sla_status\": \"string\",
-                \"recommendations\": \"string\"
-              }
+            1. Summary
+            2. Observations
+            3. SLA Status
+            4. Recommendations
 
-              If data is unclear, still populate all fields with best possible insights.
+          JMeter Data:
+          ($data)")
+          }
+          ]
+          }')")
 
-              JMeter Data:\n\($data)")
-              }
-          ],
-          temperature: 0.2
-            }')")
-  
-            echo "$RESPONSE" > ai_response.json
-                       
-            echo "Raw AI response:"
-            cat ai_response.json
-
-            AI_CONTENT=$(jq -r '.choices[0].message.content' ai_response.json)
-            echo "$AI_CONTENT" | sed -n '/{/,/}/p' > parsed_ai.json
-
-            if ! jq empty parsed_ai.json 2>/dev/null; then
-              echo "AI returned invalid JSON. Failing pipeline."
-              exit 1
-            fi
-
-          SUMMARY=$(jq -r '.summary // "No summary generated"' parsed_ai.json)
-          OBSERVATIONS=$(jq -r '.observations // "No observations generated"' parsed_ai.json)
-          SLA=$(jq -r '.sla_status // "Unknown"' parsed_ai.json)
-          RECOMMENDATIONS=$(jq -r '.recommendations // "No recommendations generated"' parsed_ai.json)
-          
-          echo "===== AI RAW CONTENT ====="
-          echo "$AI_CONTENT"
-
-          echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV
-          echo "$SUMMARY" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-          echo "AI_OBSERVATIONS<<EOF" >> $GITHUB_ENV
-          echo "$OBSERVATIONS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-          echo "AI_SLA<<EOF" >> $GITHUB_ENV
-          echo "$SLA" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-          echo "AI_RECOMMENDATIONS<<EOF" >> $GITHUB_ENV
-          echo "$RECOMMENDATIONS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-          
-          echo "===== FULL API RESPONSE ====="
-          cat ai_response.json
-
-          echo "AI analysis completed successfully"
-
+          echo "$RESPONSE" > amplify_response.json 
+          echo "===== Amplify RAW RESPONSE =====" 
+          cat amplify_response.json 
+          # Try extracting response safely AI_OUTPUT=$(jq -r '.output // .response // .message // .' amplify_response.json) 
+          echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV 
+          echo "$AI_OUTPUT" >> $GITHUB_ENV 
+          echo "EOF" >> $GITHUB_ENV echo "AI analysis completed successfully"
+        
       - name: Extract TOTAL Metrics
         run: |
           TOTAL_ROW=$(grep "TOTAL" agg.html)
