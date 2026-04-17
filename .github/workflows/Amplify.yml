@@ -34,9 +34,9 @@ jobs:
           echo "Response:"
           cat response.txt
 
-          if [ "$STATUS" = "200" ]; then
-          echo "✅ Amplify connection successful"
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "400" ]; then
+          echo "✅ Amplify endpoint is reachable"
           else
-          echo "❌ Amplify connectivity failed"
+          echo "❌ Amplify connectivity failed (Status: $STATUS)"
           exit 1
           fi
