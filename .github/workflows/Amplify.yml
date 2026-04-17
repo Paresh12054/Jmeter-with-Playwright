@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      AMPLIFY_API_KEY: ${{ secrets.AMPLIFY_API_KEY }}
+      AMPLIFY_TOKEN: ${{ secrets.AMPLIFY_API_KEY }}
       AMPLIFY_BASE_URL: https://amplify.planittesting.com
 
     steps:
@@ -18,7 +18,7 @@ jobs:
 
           STATUS=$(curl -s -o response.txt -w "%{http_code}" \
           -X POST "${AMPLIFY_BASE_URL}/external/api/completion_prompt" \
-          -H "Authorization: Bearer ${AMPLIFY_TOKEN}" \
+          -H "Authorization: Bearer $(echo -n $AMPLIFY_TOKEN)" \
           -H "Content-Type: application/json" \
           -d '{
           "prompt_id": "232e0124-928b-48d4-b06d-1be47fec90fc",
@@ -29,7 +29,7 @@ jobs:
           }
           ]
           }')
-
+          echo "Token length: ${#AMPLIFY_TOKEN}"
           echo "HTTP Status: $STATUS"
           echo "Response:"
           cat response.txt
