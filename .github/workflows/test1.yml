@@ -277,6 +277,33 @@ jobs:
             }' results.jtl >> agg.html
              echo "</table>" >> agg.html
 
+      - name: Generate JSON Summary for AI
+        run: |
+          awk -F',' '
+          NR>1 {
+          label=$3
+          success=tolower($8)
+          gsub(/\r/,"",success)
+
+          if (label ~ /^PT[0-9]+_/) {
+          total[label]++
+          if (success == "false" || success == "0") fail[label]++
+          }
+          }
+          END {
+            printf "{ \"transactions\": ["
+            first=1
+          for (l in total) {
+            if (!first) printf ","
+            printf "{ \"name\":\"%s\", \"count\":%d, \"errors\":%d }",
+            l, total[l], (fail[l] ? fail[l] : 0)
+            first=0
+          }
+          printf "], \"total_requests\": %d }\n", NR-1
+          }' results.jtl > ai_summary.json
+
+          cat ai_summary.json
+
       - name: Analyze with OpenAI
         env:
           AMPLIFY_TOKEN: ${{ secrets.AMPLIFY_TOKEN }}
@@ -289,16 +316,16 @@ jobs:
             -H "token: ${AMPLIFY_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$(jq -n \
-            --rawfile data agg.html \
+            --rawfile data ai_summary.json \
             '{
             messages: [
             {
               role: "system",
-              content: "You are a performance testing expert. Analyze JMeter results and provide summary, observations, SLA status, and recommendations."
+              content: "You are a performance testing expert. Analyze JMeter results and provide summary, observations, SLA status, and recommendations.Use ONLY the provided data. Do NOT infer or estimate request counts. All totals must match the input exactly."
             },
             {
               role: "user",
-              content: ("Analyze the following aggregated performance results:\n\n" + $data)
+              content: ("Analyze the following performance test results (JSON format). Use the request counts exactly as provided. Do not estimate.\n\n" + $data)
             }
           ]
           }')")
