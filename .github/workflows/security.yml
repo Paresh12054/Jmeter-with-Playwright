@@ -47,7 +47,7 @@ jobs:
         uses: zaproxy/action-baseline@v0.10.0
         with:
           target: "http://localhost:3000"
-          cmd_options: "-r /github/workspace/zap-report.html -J /github/workspace/zap-report.json"
+          cmd_options: "-r zap-report.html -J zap-report.json"
           allow_issue_writing: true
 
       - name: Debug files
