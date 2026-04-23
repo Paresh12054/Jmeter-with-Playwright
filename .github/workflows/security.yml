@@ -228,6 +228,7 @@ jobs:
             ${findingsHtml}
             </table>
 
+            <h2>📎 Full report attached below</h2>
             <p>
             📎 <a href="${baseUrl}/download/attachments/${pageId}/zap-report.html">
             Download Full ZAP Report
