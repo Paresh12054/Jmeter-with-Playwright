@@ -38,6 +38,10 @@ jobs:
       - name: Run npm audit
         run: npm audit --audit-level=high
 
+      - name: Fix workspace permissions
+        run: |
+          sudo chmod -R 777 $GITHUB_WORKSPACE
+
       # --- DAST with OWASP ZAP ---
       - name: ZAP Scan
         uses: zaproxy/action-baseline@v0.10.0
