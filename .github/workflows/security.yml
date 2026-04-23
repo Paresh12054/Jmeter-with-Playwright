@@ -23,7 +23,12 @@ jobs:
       - name: Run Juice Shop
         run: |
           docker run -d -p 3000:3000 bkimminich/juice-shop
-          sleep 20
+      - name: Wait for app
+        run: |
+              until curl -s http://localhost:3000 > /dev/null; do
+                echo "Waiting for Juice Shop..."
+                sleep 5
+              done
 
       # --- SAST with Semgrep ---
       - name: Run Semgrep
@@ -55,10 +60,6 @@ jobs:
           echo "Files after ZAP:"
           ls -la
           
-      - name: Prepare ZAP summary
-        run: |
-            echo -e "High: 2\nMedium: 5\nLow: 12" > zap-summary.txt
-
       - name: Publish to Confluence
         uses: actions/github-script@v7
         with:
@@ -96,19 +97,53 @@ jobs:
               const now = new Date().toLocaleString("en-GB").replace(",", "");
               
               // --- Parse ZAP ---
+              const zap = fs.existsSync("zap-report.json")
+              ? JSON.parse(fs.readFileSync("zap-report.json", "utf8"))
+              : null;
+            
               let high = 0, medium = 0, low = 0;
+              let findings = [];
               
-              if (fs.existsSync("zap-report.json")) {
-                const zap = JSON.parse(fs.readFileSync("zap-report.json", "utf8"));
-              
+              if (zap) {
                 zap.site.forEach(site => {
                   site.alerts.forEach(alert => {
-                    if (alert.riskcode === "3") high++;
-                    else if (alert.riskcode === "2") medium++;
-                    else if (alert.riskcode === "1") low++;
+                    const risk = alert.riskcode;
+              
+                   const count = alert.instances ? alert.instances.length : 1;
+
+                    if (risk === "3") high += count;
+                    else if (risk === "2") medium += count;
+                    else if (risk === "1") low += count;
+
+                    if (findingsHtml === "") {
+                    findingsHtml = `<tr><td colspan="4">No high or medium findings</td></tr>`;
+                  }
+                                  
+                    if (risk === "3" || risk === "2") {
+                      findings.push({
+                        name: alert.name,
+                        risk: alert.riskdesc,
+                        desc: alert.desc || "",
+                        solution: alert.solution || ""
+                      });
+                    }
                   });
                 });
-              }
+              }  
+              const topFindings = findings.slice(0, 5);
+
+              let findingsHtml = "";
+
+              topFindings.forEach(f => {
+                findingsHtml += `
+                <tr>
+                  <td><strong>${f.name}</strong></td>
+                  <td>${f.risk}</td>
+                  <td>${(f.desc || "").substring(0,150)}...</td>
+                  <td>${(f.solution || "").substring(0,150)}...</td>
+                </tr>
+                `;
+              });
               
               // --- Status ---
               const status =
@@ -185,10 +220,37 @@ jobs:
               <tr><td>🟠 Medium</td><td>${medium}</td></tr>
               <tr><td>🟢 Low</td><td>${low}</td></tr>
               </table>
+
+              <h2>🚨 Key Findings (High & Medium)</h2>
+
+              <table>
+              <tr>
+                <th>Issue</th>
+                <th>Risk</th>
+                <th>Description</th>
+                <th>Recommendation</th>
+              </tr>
+              ${findingsHtml}
+              </table>
+              
+              <ac:structured-macro ac:name="panel">
+              <ac:parameter ac:name="title">Summary</ac:parameter>
+              <ac:rich-text-body>
+                <p>
+                  ${
+                    high > 0
+                    ? "High-risk vulnerabilities detected. Immediate remediation is required."
+                    : medium > 0
+                    ? "Medium-risk issues found. Should be addressed soon."
+                    : "No significant vulnerabilities detected."
+                  }
+                </p>
+              </ac:rich-text-body>
+              </ac:structured-macro>
               
               <p>
               📎 <a href="${baseUrl}/download/attachments/${pageId}/zap-report.html">
-              Download ZAP Report
+              Download Full ZAP Report
               </a>
               </p>
               `;
