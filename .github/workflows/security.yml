@@ -65,130 +65,98 @@ jobs:
             script: |
               const fs = require('fs');
               const { FormData, Blob } = global;
-
+              
               const baseUrl = process.env.CONFLUENCE_BASE_URL;
               const email = process.env.CONFLUENCE_EMAIL;
               const token = process.env.CONFLUENCE_API_TOKEN;
               const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
-
-              const parentId = "13238273"; // parent page
-
+              
+              const parentId = "13238273";
+              
               const auth = Buffer.from(`${email}:${token}`).toString("base64");
-
+              
               const headers = {
                 "Authorization": `Basic ${auth}`,
                 "Content-Type": "application/json"
               };
-
+              
               async function api(url, method = "GET", body = null) {
-              const res = await fetch(url, {
-              method,
-              headers,
-                body: body ? JSON.stringify(body) : null
-              });
-
-              const text = await res.text();
-              if (!res.ok) throw new Error(text);
-
-              return text ? JSON.parse(text) : {};
+                const res = await fetch(url, {
+                  method,
+                  headers,
+                  body: body ? JSON.stringify(body) : null
+                });
+              
+                const text = await res.text();
+                if (!res.ok) throw new Error(text);
+              
+                return text ? JSON.parse(text) : {};
               }
-
+              
               const now = new Date().toLocaleString("en-GB").replace(",", "");
-
-              // --- Read summary ---
+              
+              // --- Parse ZAP ---
               let high = 0, medium = 0, low = 0;
-
+              
               if (fs.existsSync("zap-report.json")) {
                 const zap = JSON.parse(fs.readFileSync("zap-report.json", "utf8"));
               
-                const alerts = zap.site[0].alerts || [];
-              
-                alerts.forEach(alert => {
-                  const risk = alert.riskdesc.toLowerCase();
-              
-                  if (risk.includes("high")) high++;
-                  else if (risk.includes("medium")) medium++;
-                  else if (risk.includes("low")) low++;
+                zap.site.forEach(site => {
+                  site.alerts.forEach(alert => {
+                    if (alert.riskcode === "3") high++;
+                    else if (alert.riskcode === "2") medium++;
+                    else if (alert.riskcode === "1") low++;
+                  });
                 });
               }
-
-              // --- Page content ---
-              const status =
-              high > 0 ? "❌ High Risk Detected" :
-              medium > 0 ? "⚠️ Medium Risk Detected" :
-              "✅ Low Risk / Clean";
-            
-              const content = `
-              <h1>🔐 Security Scan Report</h1>
               
+              // --- Status ---
+              const status =
+                high > 0 ? "❌ High Risk Detected" :
+                medium > 0 ? "⚠️ Medium Risk Detected" :
+                "✅ Low Risk / Clean";
+              
+              // --- Create initial page (NO link yet) ---
+              const initialContent = `
+              <h1>🔐 Security Scan Report</h1>
               <p><strong>Status:</strong> ${status}</p>
               <p><strong>Scan Time:</strong> ${now}</p>
               <p><strong>Target:</strong> OWASP Juice Shop</p>
               
               <table>
-              <tr>
-                <th>Severity</th>
-                <th>Count</th>
-              </tr>
-              <tr>
-                <td>🔴 High</td>
-                <td>${high}</td>
-              </tr>
-              <tr>
-                <td>🟠 Medium</td>
-                <td>${medium}</td>
-              </tr>
-              <tr>
-                <td>🟢 Low</td>
-                <td>${low}</td>
-              </tr>
+              <tr><th>Severity</th><th>Count</th></tr>
+              <tr><td>🔴 High</td><td>${high}</td></tr>
+              <tr><td>🟠 Medium</td><td>${medium}</td></tr>
+              <tr><td>🟢 Low</td><td>${low}</td></tr>
               </table>
               
-              <ac:structured-macro ac:name="panel">
-                <ac:parameter ac:name="title">Summary</ac:parameter>
-                <ac:rich-text-body>
-                  <p>This scan was performed using OWASP ZAP baseline scan.</p>
-                  <p>Review attached report for full vulnerability details.</p>
-                </ac:rich-text-body>
-              </ac:structured-macro>
+              <p>Uploading report...</p>
+              `;
               
-              <p>
-              📎 <a href="${baseUrl}/download/attachments/${pageId}/zap-report.html">
-                Download ZAP Report
-                </a>
-                </p>
-              `;  
-  
-                // --- Create new page ---
-                const newPage = await api(`${baseUrl}/rest/api/content`, "POST", {
+              const newPage = await api(`${baseUrl}/rest/api/content`, "POST", {
                 type: "page",
-                  title: `Juice Shop Scan - ${now}`,
+                title: `Juice Shop Scan - ${now}`,
                 ancestors: [{ id: parentId }],
                 space: { key: spaceKey },
                 body: {
                   storage: {
-                  value: content,
-                  representation: "storage"
+                    value: initialContent,
+                    representation: "storage"
                   }
                 }
-                });
-  
-                const pageId = newPage.id;
-                console.log("Created page:", pageId);
-
-             
-                          // --- Attach report ---
+              });
+              
+              const pageId = newPage.id;
+              console.log("Created page:", pageId);
+              
+              // --- Upload attachment ---
               if (fs.existsSync("zap-report.html")) {
                 const fileBuffer = fs.readFileSync("zap-report.html");
               
                 const form = new FormData();
-                form.append(
-                  "file",
-                  new Blob([fileBuffer]),
-                  "zap-report.html"
-                );
+                form.append("file", new Blob([fileBuffer]), "zap-report.html");
               
-                const res = await fetch(
+                await fetch(
                   `${baseUrl}/rest/api/content/${pageId}/child/attachment`,
                   {
                     method: "POST",
@@ -199,14 +167,45 @@ jobs:
                     body: form
                   }
                 );
-                const result = await res.text();
-                console.log("Attachment response:", result);
-                }
-
-                console.log("Files:", fs.readdirSync("."));
-                console.log("HTML exists:", fs.existsSync("zap-report.html"));
               
                 console.log("ZAP report uploaded");
-              } else {
-                console.log("No zap-report.html found");
               }
+              
+              // --- Update page with link ---
+              const updatedContent = `
+              <h1>🔐 Security Scan Report</h1>
+              
+              <p><strong>Status:</strong> ${status}</p>
+              <p><strong>Scan Time:</strong> ${now}</p>
+              <p><strong>Target:</strong> OWASP Juice Shop</p>
+              
+              <table>
+              <tr><th>Severity</th><th>Count</th></tr>
+              <tr><td>🔴 High</td><td>${high}</td></tr>
+              <tr><td>🟠 Medium</td><td>${medium}</td></tr>
+              <tr><td>🟢 Low</td><td>${low}</td></tr>
+              </table>
+              
+              <p>
+              📎 <a href="${baseUrl}/download/attachments/${pageId}/zap-report.html">
+              Download ZAP Report
+              </a>
+              </p>
+              `;
+              
+              const page = await api(
+                `${baseUrl}/rest/api/content/${pageId}?expand=version,title`
+              );
+              
+              await api(`${baseUrl}/rest/api/content/${pageId}`, "PUT", {
+                id: pageId,
+                type: "page",
+                title: page.title,
+                version: { number: page.version.number + 1 },
+                body: {
+                  storage: {
+                    value: updatedContent,
+                    representation: "storage"
+                  }
+                }
+              });
