@@ -129,12 +129,25 @@ jobs:
             const topFindings = findings.slice(0, 5);
 
             let findingsHtml = "";
-            function cleanText(text) {
-            return text
-              .replace(/<[^>]*>?/gm, '')   // remove HTML tags
-              .replace(/\s+/g, ' ')        // normalize spaces
-              .trim();
-              }
+
+            topFindings.forEach(f => {
+              const risk = (f.risk || "").split(" ")[0];
+            
+              findingsHtml += `
+              <ac:structured-macro ac:name="panel">
+                <ac:parameter ac:name="title">🚨 ${f.name} (${risk})</ac:parameter>
+                <ac:rich-text-body>
+            
+                  <p><strong>📝 Description</strong></p>
+                  <p>${cleanText(f.desc).substring(0,200)}...</p>
+            
+                  <p><strong>🛠 Recommendation</strong></p>
+                  <p><em>${cleanText(f.solution).substring(0,200)}...</em></p>
+            
+                </ac:rich-text-body>
+              </ac:structured-macro>
+              `;
+            });
 
             topFindings.forEach(f => {
               findingsHtml += `
