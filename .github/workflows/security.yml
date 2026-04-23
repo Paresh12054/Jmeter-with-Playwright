@@ -152,7 +152,11 @@ jobs:
                 </ac:rich-text-body>
               </ac:structured-macro>
               
-              <p>📎 Full report attached below</p>
+              <p>
+              📎 <a href="${baseUrl}/download/attachments/${pageId}/zap-report.html">
+                Download ZAP Report
+                </a>
+                </p>
               `;  
   
                 // --- Create new page ---
@@ -184,7 +188,7 @@ jobs:
                   "zap-report.html"
                 );
               
-                await fetch(
+                const res = await fetch(
                   `${baseUrl}/rest/api/content/${pageId}/child/attachment`,
                   {
                     method: "POST",
@@ -195,6 +199,12 @@ jobs:
                     body: form
                   }
                 );
+                const result = await res.text();
+                console.log("Attachment response:", result);
+                }
+
+                console.log("Files:", fs.readdirSync("."));
+                console.log("HTML exists:", fs.existsSync("zap-report.html"));
               
                 console.log("ZAP report uploaded");
               } else {
