@@ -60,7 +60,7 @@ jobs:
               const token = process.env.CONFLUENCE_API_TOKEN;
               const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
 
-              const parentId = "6094858"; // parent page
+              const parentId = "13238273"; // parent page
 
               const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
