@@ -42,7 +42,7 @@ jobs:
         uses: zaproxy/action-baseline@v0.10.0
         with:
           target: "http://localhost:3000"
-          cmd_options: "-r zap-report.html"
+          cmd_options: "-r zap-report.html -J zap-report.json"
           
       - name: Prepare ZAP summary
         run: |
@@ -85,73 +85,83 @@ jobs:
               const now = new Date().toLocaleString("en-GB").replace(",", "");
 
               // --- Read summary ---
-              let scanSummary = "No summary available";
-              if (fs.existsSync("zap-summary.txt")) {
-              scanSummary = fs.readFileSync("zap-summary.txt", "utf8");
+              let high = 0, medium = 0, low = 0;
+
+              if (fs.existsSync("zap-report.json")) {
+                const zap = JSON.parse(fs.readFileSync("zap-report.json", "utf8"));
+              
+                const alerts = zap.site[0].alerts || [];
+              
+                alerts.forEach(alert => {
+                  const risk = alert.riskdesc.toLowerCase();
+              
+                  if (risk.includes("high")) high++;
+                  else if (risk.includes("medium")) medium++;
+                  else if (risk.includes("low")) low++;
+                });
               }
 
               // --- Page content ---
+              const status =
+              high > 0 ? "❌ High Risk Detected" :
+              medium > 0 ? "⚠️ Medium Risk Detected" :
+              "✅ Low Risk / Clean";
+            
               const content = `
               <h1>🔐 Security Scan Report</h1>
-
+              
+              <p><strong>Status:</strong> ${status}</p>
               <p><strong>Scan Time:</strong> ${now}</p>
               <p><strong>Target:</strong> OWASP Juice Shop</p>
-
+              
+              <table>
+              <tr>
+                <th>Severity</th>
+                <th>Count</th>
+              </tr>
+              <tr>
+                <td>🔴 High</td>
+                <td>${high}</td>
+              </tr>
+              <tr>
+                <td>🟠 Medium</td>
+                <td>${medium}</td>
+              </tr>
+              <tr>
+                <td>🟢 Low</td>
+                <td>${low}</td>
+              </tr>
+              </table>
+              
               <ac:structured-macro ac:name="panel">
-              <ac:parameter ac:name="title">Scan Summary</ac:parameter>
-              <ac:rich-text-body>
-              <pre>${scanSummary}</pre>
-              </ac:rich-text-body>
+                <ac:parameter ac:name="title">Summary</ac:parameter>
+                <ac:rich-text-body>
+                  <p>This scan was performed using OWASP ZAP baseline scan.</p>
+                  <p>Review attached report for full vulnerability details.</p>
+                </ac:rich-text-body>
               </ac:structured-macro>
-
-              <p>Full report attached below.</p>
-              `;
-
-              // --- Create new page ---
-              const newPage = await api(`${baseUrl}/rest/api/content`, "POST", {
-              type: "page",
-                title: `Juice Shop Scan - ${now}`,
-              ancestors: [{ id: parentId }],
-              space: { key: spaceKey },
-              body: {
-                storage: {
-                value: content,
-                representation: "storage"
-                }
-              }
-              });
-
-              const pageId = newPage.id;
-              console.log("Created page:", pageId);
-
-              // --- Attach report ---
-              if (fs.existsSync("zap-report.html")) {
-              const fileBuffer = fs.readFileSync("zap-report.html");
+              
+              <p>📎 Full report attached below</p>
+              `;  
   
-              const form = new FormData();
-              form.append(
-              "file",
-              new Blob([fileBuffer]),
-              "zap-report.html"
-              );
-
-              await fetch(
-              `${baseUrl}/rest/api/content/${pageId}/child/attachment`,
-              {
-                method: "POST",
-                headers: {
-                "Authorization": `Basic ${auth}`,
-                "X-Atlassian-Token": "no-check"
-                },
-                body: form
+                // --- Create new page ---
+                const newPage = await api(`${baseUrl}/rest/api/content`, "POST", {
+                type: "page",
+                  title: `Juice Shop Scan - ${now}`,
+                ancestors: [{ id: parentId }],
+                space: { key: spaceKey },
+                body: {
+                  storage: {
+                  value: content,
+                  representation: "storage"
+                  }
                 }
-                );
-        
-                console.log("ZAP report uploaded");
-                } else {
-                console.log("No zap-report.html found");
-                }
+                });
+  
+                const pageId = newPage.id;
+                console.log("Created page:", pageId);
 
+             
                           // --- Attach report ---
               if (fs.existsSync("zap-report.html")) {
                 const fileBuffer = fs.readFileSync("zap-report.html");
