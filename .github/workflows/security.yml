@@ -13,7 +13,8 @@ jobs:
       CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
       CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
       CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
-
+      ZAP_WORKING_DIR: /github/workspace
+      
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -42,7 +43,13 @@ jobs:
         uses: zaproxy/action-baseline@v0.10.0
         with:
           target: "http://localhost:3000"
-          cmd_options: "-r zap-report.html -J zap-report.json"
+          cmd_options: "-r /github/workspace/zap-report.html -J /github/workspace/zap-report.json"
+          allow_issue_writing: true
+
+      - name: Debug files
+        run: |
+          echo "Files after ZAP:"
+          ls -la
           
       - name: Prepare ZAP summary
         run: |
