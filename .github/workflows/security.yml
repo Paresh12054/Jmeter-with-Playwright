@@ -165,8 +165,8 @@ jobs:
               <tr>
                 <td><strong>${f.name}</strong></td>
                 <td>${f.risk}</td>
-                <td>${cleanText(f.desc).substring(0,120).replace(/\./g, '.<br/>')}</td>
-                <td><em>${cleanText(f.solution).substring(0,120)}...</em></td>
+                <td>${firstSentence(f.desc)}</td>
+                <td>${firstSentence(f.solution)}</td>
               </tr>
               `;
             });
