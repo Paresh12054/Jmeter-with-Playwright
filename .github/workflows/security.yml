@@ -52,9 +52,8 @@ jobs:
         if: hashFiles('package.json') != ''
         run: npm audit --audit-level=high || true
 
-      # Fix permissions for ZAP (safer)
-      - name: Fix workspace permissions
-        run: sudo chown -R $USER:$USER $GITHUB_WORKSPACE
+      - name: Fix workspace permissions (ZAP safe)
+        run: sudo chmod -R a+rwX $GITHUB_WORKSPACE
 
       # --- DAST ---
       - name: ZAP Scan
