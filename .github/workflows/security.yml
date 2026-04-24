@@ -90,8 +90,10 @@ jobs:
               "Content-Type": "application/json"
             };
 
-            function cleanText(text = "") {
-              return text.replace(/<[^>]*>?/gm, "").trim();
+            function firstSentence(text = "") {
+            const clean = text.replace(/<[^>]*>?/gm, "").trim();
+            const match = clean.match(/.*?[.!?](\s|$)/);
+            return match ? match[0].trim() : clean;
             }
 
             async function api(url, method = "GET", body = null) {
@@ -152,9 +154,9 @@ jobs:
                 <ac:parameter ac:name="title">🚨 ${f.name} (${risk})</ac:parameter>
                 <ac:rich-text-body>
                   <p><strong>📝 Description</strong></p>
-                  <p>${cleanText(f.desc).substring(0,200)}...</p>
+                  <p>${firstSentence(f.desc)}</p>
                   <p><strong>🛠 Recommendation</strong></p>
-                  <p><em>${cleanText(f.solution).substring(0,200)}...</em></p>
+                  <p><em>${firstSentence(f.solution)}</em></p>
                 </ac:rich-text-body>
               </ac:structured-macro>
               `;
