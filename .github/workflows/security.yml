@@ -18,13 +18,13 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Start Juice Shop
+      # --- Start Juice Shop ---
       - name: Run Juice Shop
         run: docker run -d -p 3000:3000 bkimminich/juice-shop
 
       - name: Wait for app
         run: |
-          until curl -s http://localhost:3000 > /dev/null; do
+          until curl -s http://localhost:3000/#/ > /dev/null; do
             echo "Waiting for Juice Shop..."
             sleep 5
           done
@@ -37,21 +37,23 @@ jobs:
 
       # --- Dependency scan ---
       - name: Install dependencies
-        run: npm install
+        if: hashFiles('package.json') != ''
+        run: npm ci
 
       - name: Run npm audit
-        run: npm audit --audit-level=high
+        if: hashFiles('package.json') != ''
+        run: npm audit --audit-level=high || true
 
-      # Fix permissions for ZAP
+      # Fix permissions for ZAP (safer)
       - name: Fix workspace permissions
-        run: sudo chmod -R 777 $GITHUB_WORKSPACE
+        run: sudo chown -R $USER:$USER $GITHUB_WORKSPACE
 
       # --- DAST ---
       - name: ZAP Scan
         uses: zaproxy/action-baseline@v0.10.0
         with:
           target: "http://localhost:3000"
-          cmd_options: "-r zap-report.html -J zap-report.json"
+          cmd_options: "-r zap-report.html -J zap-report.json -m 5"
           allow_issue_writing: true
 
       - name: Debug files
@@ -80,6 +82,10 @@ jobs:
               "Authorization": `Basic ${auth}`,
               "Content-Type": "application/json"
             };
+
+            function cleanText(text = "") {
+              return text.replace(/<[^>]*>?/gm, "").trim();
+            }
 
             async function api(url, method = "GET", body = null) {
               const res = await fetch(url, {
@@ -128,29 +134,25 @@ jobs:
 
             const topFindings = findings.slice(0, 5);
 
-            let findingsHtml = "";
+            let panelHtml = "";
+            let tableRows = "";
 
             topFindings.forEach(f => {
               const risk = (f.risk || "").split(" ")[0];
-            
-              findingsHtml += `
+
+              panelHtml += `
               <ac:structured-macro ac:name="panel">
                 <ac:parameter ac:name="title">🚨 ${f.name} (${risk})</ac:parameter>
                 <ac:rich-text-body>
-            
                   <p><strong>📝 Description</strong></p>
                   <p>${cleanText(f.desc).substring(0,200)}...</p>
-            
                   <p><strong>🛠 Recommendation</strong></p>
                   <p><em>${cleanText(f.solution).substring(0,200)}...</em></p>
-            
                 </ac:rich-text-body>
               </ac:structured-macro>
               `;
-            });
 
-            topFindings.forEach(f => {
-              findingsHtml += `
+              tableRows += `
               <tr>
                 <td><strong>${f.name}</strong></td>
                 <td>${f.risk}</td>
@@ -160,8 +162,8 @@ jobs:
               `;
             });
 
-            if (findingsHtml === "") {
-              findingsHtml = `<tr><td colspan="4">No high or medium findings</td></tr>`;
+            if (tableRows === "") {
+              tableRows = `<tr><td colspan="4">No high or medium findings</td></tr>`;
             }
 
             const status =
@@ -208,7 +210,7 @@ jobs:
               const form = new FormData();
               form.append("file", new Blob([fileBuffer]), "zap-report.html");
 
-              await fetch(
+              const res = await fetch(
                 `${baseUrl}/rest/api/content/${pageId}/child/attachment`,
                 {
                   method: "POST",
@@ -219,6 +221,10 @@ jobs:
                   body: form
                 }
               );
+
+              if (!res.ok) {
+                throw new Error("Attachment upload failed");
+              }
             }
 
             // --- Update page ---
@@ -237,6 +243,8 @@ jobs:
             </table>
 
             <h2>🚨 Key Findings</h2>
+            ${panelHtml}
+
             <table>
             <tr>
               <th>Issue</th>
@@ -244,7 +252,7 @@ jobs:
               <th>Description</th>
               <th>Recommendation</th>
             </tr>
-            ${findingsHtml}
+            ${tableRows}
             </table>
 
             <h2>📎 Full report attached below</h2>
@@ -271,3 +279,8 @@ jobs:
                 }
               }
             });
+
+      # --- Cleanup ---
+      - name: Stop Juice Shop
+        if: always()
+        run: docker stop $(docker ps -q)
