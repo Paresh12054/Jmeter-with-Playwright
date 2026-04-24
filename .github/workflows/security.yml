@@ -36,9 +36,17 @@ jobs:
           config: "p/security-audit"
 
       # --- Dependency scan ---
+      
       - name: Install dependencies
         if: hashFiles('package.json') != ''
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+          echo "Using npm ci"
+            npm ci
+          else
+          echo "No lockfile, falling back to npm install"
+          npm install
+          fi
 
       - name: Run npm audit
         if: hashFiles('package.json') != ''
