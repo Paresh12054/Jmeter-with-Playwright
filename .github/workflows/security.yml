@@ -252,16 +252,6 @@ jobs:
             <h2>🚨 Key Findings</h2>
             ${panelHtml}
 
-            <table>
-            <tr>
-              <th>Issue</th>
-              <th>Risk</th>
-              <th>Description</th>
-              <th>Recommendation</th>
-            </tr>
-            ${tableRows}
-            </table>
-
             <h2>📎 Full report attached below</h2>
             <p>
             <a href="${baseUrl}/download/attachments/${pageId}/zap-report.html">
