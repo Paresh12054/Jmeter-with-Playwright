@@ -16,19 +16,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Publish to Confluence
+      - name: Publish HTML Report to Confluence
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
 
+            // Environment variables
             const baseUrl = process.env.CONFLUENCE_BASE_URL;
             const email = process.env.CONFLUENCE_EMAIL;
             const token = process.env.CONFLUENCE_API_TOKEN;
             const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
 
+            // Parent page ID
             const parentId = "18907150";
 
+            // Authentication
             const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
             const headers = {
@@ -36,34 +39,55 @@ jobs:
               "Content-Type": "application/json"
             };
 
-            // Validate report exists
+            // Report path
             const reportPath = 'reports/zap-report.html';
 
+            // Validate report exists
             if (!fs.existsSync(reportPath)) {
               throw new Error(`Report file not found: ${reportPath}`);
             }
 
+            console.log(`Reading report from: ${reportPath}`);
+
             // Read HTML report
-            const htmlContent = fs.readFileSync(reportPath, 'utf8');
+            let htmlContent = fs.readFileSync(reportPath, 'utf8');
 
-            // Escape CDATA termination if present
-            const safeHtml = htmlContent.replace(/]]>/g, ']]]]><![CDATA[>');
+            // Remove unsupported HTML tags
+            htmlContent = htmlContent
+              .replace(/<!DOCTYPE[^>]*>/gi, '')
+              .replace(/<html[^>]*>/gi, '')
+              .replace(/<\/html>/gi, '')
+              .replace(/<head[\s\S]*?<\/head>/gi, '')
+              .replace(/<body[^>]*>/gi, '')
+              .replace(/<\/body>/gi, '');
 
-            // Dynamic title
+            // Generate timestamp
             const timestamp = new Date().toISOString();
+
+            // Page title
+            const pageTitle = `ZAP Security Report - ${timestamp}`;
 
             // Confluence page body
             const pageBody = `
-            <ac:structured-macro ac:name="html">
-              <ac:plain-text-body><![CDATA[
-                ${safeHtml}
-              ]]></ac:plain-text-body>
-            </ac:structured-macro>
+              <h1>ZAP Security Report</h1>
+
+              <p>
+                <b>Generated:</b> ${timestamp}<br/>
+                <b>Repository:</b> ${process.env.GITHUB_REPOSITORY}<br/>
+                <b>Branch:</b> ${process.env.GITHUB_REF_NAME}<br/>
+                <b>Workflow:</b> ${process.env.GITHUB_WORKFLOW}<br/>
+                <b>Run Number:</b> ${process.env.GITHUB_RUN_NUMBER}
+              </p>
+
+              <hr/>
+
+              ${htmlContent}
             `;
 
+            // Confluence payload
             const pageData = {
               type: "page",
-              title: `HTML Report - ${timestamp}`,
+              title: pageTitle,
               ancestors: [{ id: parentId }],
               space: {
                 key: spaceKey
@@ -76,6 +100,9 @@ jobs:
               }
             };
 
+            console.log("Creating Confluence page...");
+
+            // Create page
             const response = await fetch(
               `${baseUrl}/rest/api/content`,
               {
@@ -85,14 +112,24 @@ jobs:
               }
             );
 
+            // Handle errors
             if (!response.ok) {
               const errorText = await response.text();
+
+              console.log("Confluence API Error:");
+              console.log(errorText);
+
               throw new Error(
-                `Confluence API failed: ${response.status} - ${errorText}`
+                `Failed to create page: ${response.status}`
               );
             }
 
+            // Parse response
             const result = await response.json();
 
             console.log("Confluence page created successfully");
-            console.log(result._links.webui);
+
+            // Print page URL
+            console.log(
+              `${baseUrl}${result._links.webui}`
+            );
