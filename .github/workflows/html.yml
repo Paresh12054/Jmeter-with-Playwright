@@ -63,7 +63,7 @@ jobs:
 
             const pageData = {
               type: "page",
-              title: `ZAP Security Report - ${timestamp}`,
+              title: `HTML Report - ${timestamp}`,
               ancestors: [{ id: parentId }],
               space: {
                 key: spaceKey
