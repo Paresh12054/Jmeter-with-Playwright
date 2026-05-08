@@ -77,7 +77,7 @@ jobs:
             };
 
             const response = await fetch(
-              `${baseUrl}/wiki/rest/api/content`,
+              `${baseUrl}/rest/api/content`,
               {
                 method: "POST",
                 headers,
