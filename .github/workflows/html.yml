@@ -71,7 +71,6 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const FormData = require('form-data');
 
             const baseUrl = process.env.CONFLUENCE_BASE_URL;
             const email = process.env.CONFLUENCE_EMAIL;
@@ -135,31 +134,36 @@ jobs:
             console.log(`Page created: ${pageId}`);
 
             // Step 2: Upload attachment
-            const form = new FormData();
+            // Step 2: Upload attachment
 
-            form.append(
-              "file",
-              fs.createReadStream("zap-report.png")
-            );
-
-            const uploadResponse = await fetch(
-              `${baseUrl}/rest/api/content/${pageId}/child/attachment`,
-              {
-                method: "POST",
-                headers: {
-                  "Authorization": `Basic ${auth}`,
-                  "X-Atlassian-Token": "no-check",
-                  ...form.getHeaders()
-                },
-                body: form
+              const fileBuffer = fs.readFileSync("zap-report.png");
+              
+              const form = new FormData();
+              
+              form.append(
+                "file",
+                new Blob([fileBuffer], { type: "image/png" }),
+                "zap-report.png"
+              );
+              
+              const uploadResponse = await fetch(
+                `${baseUrl}/rest/api/content/${pageId}/child/attachment`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Basic ${auth}`,
+                    "X-Atlassian-Token": "no-check"
+                  },
+                  body: form
+                }
+              );
+              
+              if (!uploadResponse.ok) {
+                const uploadError = await uploadResponse.text();
+                throw new Error(uploadError);
               }
-            );
-
-            if (!uploadResponse.ok) {
-              throw new Error(await uploadResponse.text());
-            }
-
-            console.log("Attachment uploaded");
+              
+              console.log("Attachment uploaded successfully");
 
             // Step 3: Update page with embedded image
             const imageBody = `
