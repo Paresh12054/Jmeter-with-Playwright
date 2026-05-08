@@ -1,10 +1,10 @@
-name: HTML Integration
+name: Publish HTML Screenshot to Confluence
 
 on:
   workflow_dispatch:
 
 jobs:
-  performance-and-ui:
+  publish-report:
     runs-on: ubuntu-latest
 
     env:
@@ -14,24 +14,72 @@ jobs:
       CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Publish HTML Report to Confluence
+      # Install Node
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Install Playwright
+      - name: Install Playwright
+        run: |
+          npm install playwright
+          npx playwright install chromium
+
+      # Generate screenshot from HTML
+      - name: Generate Screenshot
+        run: |
+          node <<EOF
+          const { chromium } = require('playwright');
+          const path = require('path');
+
+          (async () => {
+            const browser = await chromium.launch({
+              headless: true
+            });
+
+            const page = await browser.newPage({
+              viewport: {
+                width: 1600,
+                height: 900
+              }
+            });
+
+            const htmlPath = 'file://' + path.resolve('reports/zap-report.html');
+
+            await page.goto(htmlPath, {
+              waitUntil: 'networkidle'
+            });
+
+            await page.screenshot({
+              path: 'zap-report.png',
+              fullPage: true
+            });
+
+            await browser.close();
+
+            console.log('Screenshot created');
+          })();
+          EOF
+
+      # Publish to Confluence
+      - name: Publish Screenshot to Confluence
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
+            const FormData = require('form-data');
 
-            // Environment variables
             const baseUrl = process.env.CONFLUENCE_BASE_URL;
             const email = process.env.CONFLUENCE_EMAIL;
             const token = process.env.CONFLUENCE_API_TOKEN;
             const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
 
-            // Parent page ID
             const parentId = "18907150";
 
-            // Authentication
             const auth = Buffer.from(`${email}:${token}`).toString("base64");
 
             const headers = {
@@ -39,71 +87,35 @@ jobs:
               "Content-Type": "application/json"
             };
 
-            // Report path
-            const reportPath = 'reports/zap-report.html';
-
-            // Validate report exists
-            if (!fs.existsSync(reportPath)) {
-              throw new Error(`Report file not found: ${reportPath}`);
-            }
-
-            console.log(`Reading report from: ${reportPath}`);
-
-            // Read HTML report
-            let htmlContent = fs.readFileSync(reportPath, 'utf8');
-
-            // Remove unsupported HTML tags
-            htmlContent = htmlContent
-              .replace(/<!DOCTYPE[^>]*>/gi, '')
-              .replace(/<html[^>]*>/gi, '')
-              .replace(/<\/html>/gi, '')
-              .replace(/<head[\s\S]*?<\/head>/gi, '')
-              .replace(/<body[^>]*>/gi, '')
-              .replace(/<\/body>/gi, '');
-
-            // Generate timestamp
             const timestamp = new Date().toISOString();
 
-            // Page title
-            const pageTitle = `ZAP Security Report - ${timestamp}`;
-
-            // Confluence page body
-            const pageBody = `
-              <h1>ZAP Security Report</h1>
-
-              <p>
-                <b>Generated:</b> ${timestamp}<br/>
-                <b>Repository:</b> ${process.env.GITHUB_REPOSITORY}<br/>
-                <b>Branch:</b> ${process.env.GITHUB_REF_NAME}<br/>
-                <b>Workflow:</b> ${process.env.GITHUB_WORKFLOW}<br/>
-                <b>Run Number:</b> ${process.env.GITHUB_RUN_NUMBER}
-              </p>
-
-              <hr/>
-
-              ${htmlContent}
-            `;
-
-            // Confluence payload
+            // Step 1: Create Confluence Page
             const pageData = {
               type: "page",
-              title: pageTitle,
+              title: `ZAP Security Report - ${timestamp}`,
               ancestors: [{ id: parentId }],
               space: {
                 key: spaceKey
               },
               body: {
                 storage: {
-                  value: pageBody,
+                  value: `
+                    <h1>ZAP Security Report</h1>
+
+                    <p>
+                      Generated from GitHub Actions pipeline.
+                    </p>
+
+                    <p>
+                      Screenshot will appear below after upload.
+                    </p>
+                  `,
                   representation: "storage"
                 }
               }
             };
 
-            console.log("Creating Confluence page...");
-
-            // Create page
-            const response = await fetch(
+            const createPageResponse = await fetch(
               `${baseUrl}/rest/api/content`,
               {
                 method: "POST",
@@ -112,24 +124,86 @@ jobs:
               }
             );
 
-            // Handle errors
-            if (!response.ok) {
-              const errorText = await response.text();
-
-              console.log("Confluence API Error:");
-              console.log(errorText);
-
-              throw new Error(
-                `Failed to create page: ${response.status}`
-              );
+            if (!createPageResponse.ok) {
+              throw new Error(await createPageResponse.text());
             }
 
-            // Parse response
-            const result = await response.json();
+            const pageResult = await createPageResponse.json();
 
-            console.log("Confluence page created successfully");
+            const pageId = pageResult.id;
 
-            // Print page URL
+            console.log(`Page created: ${pageId}`);
+
+            // Step 2: Upload attachment
+            const form = new FormData();
+
+            form.append(
+              "file",
+              fs.createReadStream("zap-report.png")
+            );
+
+            const uploadResponse = await fetch(
+              `${baseUrl}/rest/api/content/${pageId}/child/attachment`,
+              {
+                method: "POST",
+                headers: {
+                  "Authorization": `Basic ${auth}`,
+                  "X-Atlassian-Token": "no-check",
+                  ...form.getHeaders()
+                },
+                body: form
+              }
+            );
+
+            if (!uploadResponse.ok) {
+              throw new Error(await uploadResponse.text());
+            }
+
+            console.log("Attachment uploaded");
+
+            // Step 3: Update page with embedded image
+            const imageBody = `
+              <h1>ZAP Security Report</h1>
+
+              <p>
+                Generated from GitHub Actions pipeline.
+              </p>
+
+              <ac:image ac:width="1400">
+                <ri:attachment ri:filename="zap-report.png"/>
+              </ac:image>
+            `;
+
+            const updatePayload = {
+              id: pageId,
+              type: "page",
+              title: pageResult.title,
+              version: {
+                number: pageResult.version.number + 1
+              },
+              body: {
+                storage: {
+                  value: imageBody,
+                  representation: "storage"
+                }
+              }
+            };
+
+            const updateResponse = await fetch(
+              `${baseUrl}/rest/api/content/${pageId}`,
+              {
+                method: "PUT",
+                headers,
+                body: JSON.stringify(updatePayload)
+              }
+            );
+
+            if (!updateResponse.ok) {
+              throw new Error(await updateResponse.text());
+            }
+
+            console.log("Page updated with image");
+
             console.log(
-              `${baseUrl}${result._links.webui}`
+              `${baseUrl}${pageResult._links.webui}`
             );
