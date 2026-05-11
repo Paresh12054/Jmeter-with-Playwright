@@ -144,7 +144,7 @@ jobs:
 
       - name: Generate JMeter Dashboard Screenshots
         run: |
-          node <<EOF
+          node <<'EOF'
           const { chromium } = require('playwright');
           const path = require('path');
           const fs = require('fs');
@@ -162,7 +162,8 @@ jobs:
               }
             });
       
-            const reportPath = 'file://' + path.resolve('jmeter-report/index.html');
+            const reportPath =
+              'file://' + path.resolve('jmeter-report/index.html');
       
             console.log("Opening JMeter dashboard...");
       
@@ -171,10 +172,10 @@ jobs:
               timeout: 120000
             });
       
-            // wait for graphs to render
+            // Wait for graphs to render
             await page.waitForTimeout(5000);
       
-            // full dashboard screenshot
+            // Full dashboard screenshot
             await page.screenshot({
               path: 'jmeter-dashboard-full.png',
               fullPage: true
@@ -182,33 +183,38 @@ jobs:
       
             console.log("Full dashboard screenshot created");
       
-            // Optional: capture individual graph sections
-            const charts = await page.locator('canvas').all();
-      
-            console.log(`Found ${charts.length} charts`);
-      
+            // Create graph folder
             if (!fs.existsSync('jm-graphs')) {
               fs.mkdirSync('jm-graphs');
             }
+      
+            // Capture chart canvases
+            const charts = await page.locator('canvas').all();
+      
+            console.log(`Found ${charts.length} charts`);
       
             for (let i = 0; i < charts.length; i++) {
       
               try {
       
+                const chartPath = `jm-graphs/chart-${i + 1}.png`;
+      
                 await charts[i].screenshot({
-                  path: `jm-graphs/chart-${i + 1}.png`
+                  path: chartPath
                 });
       
-                console.log(`Saved chart-${i + 1}.png`);
+                console.log(`Saved ${chartPath}`);
       
               } catch (err) {
       
-                console.log(`Failed chart ${i + 1}`);
+                console.log(`Failed chart ${i + 1}: ${err.message}`);
       
               }
             }
       
             await browser.close();
+      
+            console.log("JMeter screenshots generation completed");
       
           })();
           EOF
