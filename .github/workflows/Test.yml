@@ -64,7 +64,8 @@ jobs:
             TS=$(date +"%Y-%m-%d_%H-%M-%S")
             FILE="pw-results/result-$TS.json"
 
-            OUTPUT=$(npx playwright test tests/Demo1.spec.ts --reporter=json || true)
+            OUTPUT=$(npx playwright test tests/Demo1.spec.ts \
+                    --reporter=json,html || true)
             echo "$OUTPUT" > "$FILE"
 
             END_SEC=$(date +%s)
@@ -91,14 +92,64 @@ jobs:
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
 
+      - name: Generate Playwright HTML Screenshot
+        run: |
+          node <<EOF
+          const { chromium } = require('playwright');
+          const path = require('path');
+      
+          (async () => {
+      
+            const browser = await chromium.launch({
+              headless: true
+            });
+      
+            const page = await browser.newPage({
+              viewport: {
+                width: 1600,
+                height: 900
+              }
+            });
+      
+            const htmlPath = 'file://' + path.resolve('playwright-report/index.html');
+      
+            await page.goto(htmlPath, {
+              waitUntil: 'networkidle'
+            });
+      
+            await page.screenshot({
+              path: 'playwright-report.png',
+              fullPage: true
+            });
+      
+            await browser.close();
+      
+            console.log('Playwright screenshot created');
+      
+          })();
+          EOF
+
       - name: Stop JMeter
         run: |
           kill $(cat jmeter.pid) || true
           date +"%Y-%m-%d %H:%M:%S" > jm_end.txt
 
+      - name: Zip Playwright HTML Report
+        run: |
+          zip -r playwright-report.zip playwright-report
+
       - name: Generate JMeter HTML Report
         run: |
           ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
+
+      - name: Prepare JMeter Graphs
+        run: |
+          mkdir -p jm-graphs
+
+          cp jmeter-report/content/img/*.png jm-graphs/ || true
+
+          echo "Copied JMeter graphs:"
+          ls -l jm-graphs
 
       - name: Prepare JTL for AI
         run: |
@@ -759,8 +810,260 @@ jobs:
                 );
               
                 console.log("ZAP child page updated with embedded image");
-              }        
+              }
               
+              // ==========================================
+              // Create JMeter Graph Child Page
+              // ==========================================
+              
+              if (fs.existsSync("jm-graphs")) {
+              
+                console.log("Creating JMeter graphs child page...");
+              
+                // Create child page
+                const jmChild = await api(`${baseUrl}/rest/api/content`, "POST", {
+                  type: "page",
+                  title: `JMeter Graphs Report - ${now}`,
+                  ancestors: [{ id: child.id }],
+                  space: { key: spaceKey },
+                  body: {
+                    storage: {
+                      value: `
+                        <h1>📈 JMeter Performance Graphs</h1>
+              
+                        <p>
+                          Visual graphs generated from JMeter HTML Dashboard.
+                        </p>
+                      `,
+                      representation: "storage"
+                    }
+                  }
+                });
+              
+                console.log(`JMeter child page created: ${jmChild.id}`);
+              
+                // Upload all graph PNGs
+                const graphFiles = fs.readdirSync("jm-graphs");
+              
+                for (const file of graphFiles) {
+              
+                  const filePath = `jm-graphs/${file}`;
+              
+                  const buffer = fs.readFileSync(filePath);
+              
+                  const form = new FormData();
+              
+                  form.append(
+                    "file",
+                    new Blob([buffer], { type: "image/png" }),
+                    file
+                  );
+              
+                  const uploadResponse = await fetch(
+                    `${baseUrl}/rest/api/content/${jmChild.id}/child/attachment`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Authorization": `Basic ${auth}`,
+                        "X-Atlassian-Token": "no-check"
+                      },
+                      body: form
+                    }
+                  );
+              
+                  if (!uploadResponse.ok) {
+                    throw new Error(await uploadResponse.text());
+                  }
+              
+                  console.log(`Uploaded ${file}`);
+                }
+              
+                // Build embedded image HTML
+                let graphHtml = `
+                  <h1>📈 JMeter Performance Graphs</h1>
+                  <p>Generated from results.jtl</p>
+                `;
+              
+                for (const file of graphFiles) {
+              
+                  graphHtml += `
+                    <h2>${file}</h2>
+              
+                    <ac:image ac:width="1400">
+                      <ri:attachment ri:filename="${file}" />
+                    </ac:image>
+              
+                    <br/><br/>
+                  `;
+                }
+              
+                // Get latest version
+                const latestJMPage = await api(
+                  `${baseUrl}/rest/api/content/${jmChild.id}?expand=version`
+                );
+              
+                // Update page
+                await api(
+                  `${baseUrl}/rest/api/content/${jmChild.id}`,
+                  "PUT",
+                  {
+                    id: jmChild.id,
+                    type: "page",
+                    title: latestJMPage.title,
+                    version: {
+                      number: latestJMPage.version.number + 1
+                    },
+                    body: {
+                      storage: {
+                        value: graphHtml,
+                        representation: "storage"
+                      }
+                    }
+                  }
+                );
+              
+                console.log("JMeter graph page updated");
+              }
+              
+              // ==========================================
+              // Create Playwright HTML Report Child Page
+              // ==========================================
+              
+              if (fs.existsSync("playwright-report.png")) {
+              
+                console.log("Creating Playwright child page...");
+              
+                // Create child page
+                const pwChild = await api(`${baseUrl}/rest/api/content`, "POST", {
+                  type: "page",
+                  title: `Playwright UI Report - ${now}`,
+                  ancestors: [{ id: child.id }],
+                  space: { key: spaceKey },
+                  body: {
+                    storage: {
+                      value: `
+                        <h1>🎭 Playwright UI Automation Report</h1>
+              
+                        <p>
+                          Visual execution report generated from Playwright HTML Reporter.
+                        </p>
+              
+                        <p>
+                          Full HTML report is attached to this page.
+                        </p>
+                      `,
+                      representation: "storage"
+                    }
+                  }
+                });
+              
+                console.log(`Playwright child page created: ${pwChild.id}`);
+              
+                // Upload Screenshot
+                const imageBuffer = fs.readFileSync("playwright-report.png");
+              
+                let form = new FormData();
+              
+                form.append(
+                  "file",
+                  new Blob([imageBuffer], { type: "image/png" }),
+                  "playwright-report.png"
+                );
+              
+                let uploadResponse = await fetch(
+                  `${baseUrl}/rest/api/content/${pwChild.id}/child/attachment`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Authorization": `Basic ${auth}`,
+                      "X-Atlassian-Token": "no-check"
+                    },
+                    body: form
+                  }
+                );
+              
+                if (!uploadResponse.ok) {
+                  throw new Error(await uploadResponse.text());
+                }
+              
+                console.log("Playwright screenshot uploaded");
+              
+                // Upload ZIP report
+                if (fs.existsSync("playwright-report.zip")) {
+              
+                  const zipBuffer = fs.readFileSync("playwright-report.zip");
+              
+                  form = new FormData();
+              
+                  form.append(
+                    "file",
+                    new Blob([zipBuffer], { type: "application/zip" }),
+                    "playwright-report.zip"
+                  );
+              
+                  uploadResponse = await fetch(
+                    `${baseUrl}/rest/api/content/${pwChild.id}/child/attachment`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Authorization": `Basic ${auth}`,
+                        "X-Atlassian-Token": "no-check"
+                      },
+                      body: form
+                    }
+                  );
+              
+                  if (!uploadResponse.ok) {
+                    throw new Error(await uploadResponse.text());
+                  }
+              
+                  console.log("Playwright ZIP uploaded");
+                }
+              
+                // Get latest version
+                const latestPWPage = await api(
+                  `${baseUrl}/rest/api/content/${pwChild.id}?expand=version`
+                );
+              
+                // Update page with embedded screenshot
+                await api(
+                  `${baseUrl}/rest/api/content/${pwChild.id}`,
+                  "PUT",
+                  {
+                    id: pwChild.id,
+                    type: "page",
+                    title: latestPWPage.title,
+                    version: {
+                      number: latestPWPage.version.number + 1
+                    },
+                    body: {
+                      storage: {
+                        value: `
+                          <h1>🎭 Playwright UI Automation Report</h1>
+              
+                          <p>
+                            Full rendered screenshot of Playwright HTML report.
+                          </p>
+              
+                          <p>
+                            Download attached ZIP for complete interactive report.
+                          </p>
+              
+                          <ac:image ac:width="1400">
+                            <ri:attachment ri:filename="playwright-report.png"/>
+                          </ac:image>
+              
+                          <h2>📎 Attachments</h2>
+                          <ac:structured-macro ac:name="attachments"/>
+                        `,
+                        representation: "storage"
+                      }
+                    }
+                  }
+                );
+              
+                console.log("Playwright page updated");
+              }
 
               // ✅ Sr.No calculation
               let match = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
