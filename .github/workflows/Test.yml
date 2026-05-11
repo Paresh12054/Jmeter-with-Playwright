@@ -64,8 +64,11 @@ jobs:
             TS=$(date +"%Y-%m-%d_%H-%M-%S")
             FILE="pw-results/result-$TS.json"
 
-            OUTPUT=$(npx playwright test tests/Demo1.spec.ts \
-                    --reporter=json,html || true)
+            REPORT_DIR="playwright-report-$RUN_INDEX"
+
+            OUTPUT=$(PLAYWRIGHT_HTML_REPORT=$REPORT_DIR \
+              npx playwright test tests/Demo1.spec.ts \
+              --reporter=json,html || true)
             echo "$OUTPUT" > "$FILE"
 
             END_SEC=$(date +%s)
@@ -94,10 +97,10 @@ jobs:
 
       - name: Generate Playwright HTML Screenshot
         run: |
-          node <<EOF
+          node <<'EOF'
           const { chromium } = require('playwright');
           const path = require('path');
-      
+          const fs = require('fs');
           (async () => {
       
             const browser = await chromium.launch({
@@ -111,7 +114,14 @@ jobs:
               }
             });
       
-            const htmlPath = 'file://' + path.resolve('playwright-report/index.html');
+            const reports = fs.readdirSync('.')
+              .filter(f => f.startsWith('playwright-report-'))
+              .sort();
+            
+            const latestReport = reports[reports.length - 1];
+            
+            const htmlPath =
+              'file://' + path.resolve(`${latestReport}/index.html`);
       
             await page.goto(htmlPath, {
               waitUntil: 'networkidle'
@@ -136,7 +146,7 @@ jobs:
 
       - name: Zip Playwright HTML Report
         run: |
-          zip -r playwright-report.zip playwright-report
+          zip -r playwright-report.zip playwright-report*
 
       - name: Generate JMeter HTML Report
         run: |
@@ -192,7 +202,9 @@ jobs:
             const charts = await page.locator('canvas').all();
       
             console.log(`Found ${charts.length} charts`);
-      
+            if (charts.length === 0) {
+              console.log("No charts found in dashboard");
+            }
             for (let i = 0; i < charts.length; i++) {
       
               try {
@@ -219,15 +231,7 @@ jobs:
           })();
           EOF
 
-      - name: Prepare JMeter Graphs
-        run: |
-          mkdir -p jm-graphs
-
-          const graphFiles = fs.readdirSync("jm-graphs"); 
-
-          echo "Copied JMeter graphs:"
-          ls -l jm-graphs
-
+      
       - name: Prepare JTL for AI
         run: |
           echo "Preparing JTL sample for AI..."
@@ -252,7 +256,7 @@ jobs:
 
       - name: Generate ZAP Screenshot
         run: |
-          node <<EOF
+          node <<'EOF'
           const { chromium } = require('playwright');
           const path = require('path');
 
@@ -517,37 +521,7 @@ jobs:
           echo "TOTAL_AVG=$TOTAL_AVG" >> $GITHUB_ENV
           echo "TOTAL_P90=$TOTAL_P90" >> $GITHUB_ENV
 
-                     
-      - name: Calculate Deviation
-        run: |
-          if [ "$HAS_PREV" = "false" ]; then
-          echo "DEV_AVG=0" >> $GITHUB_ENV
-          echo "DEV_P90=0" >> $GITHUB_ENV
-          echo "AVG_COLOR=Grey" >> $GITHUB_ENV
-          echo "P90_COLOR=Grey" >> $GITHUB_ENV
-          echo "DEV_LABEL=N/A" >> $GITHUB_ENV
-          else
-          DEV_AVG=$((TOTAL_AVG - PREV_AVG))
-          DEV_P90=$((TOTAL_P90 - PREV_P90))
-
-          echo "DEV_AVG=$DEV_AVG" >> $GITHUB_ENV
-          echo "DEV_P90=$DEV_P90" >> $GITHUB_ENV
-
-          if [ "$DEV_AVG" -lt 0 ]; then
-            echo "AVG_COLOR=Green" >> $GITHUB_ENV
-          else
-            echo "AVG_COLOR=Red" >> $GITHUB_ENV
-          fi
-
-          if [ "$DEV_P90" -lt 0 ]; then
-            echo "P90_COLOR=Green" >> $GITHUB_ENV
-          else
-            echo "P90_COLOR=Red" >> $GITHUB_ENV
-          fi
-
-            echo "DEV_LABEL=${DEV_AVG} ms" >> $GITHUB_ENV
-          fi
-
+                    
       - name: Evaluate Overall SLA Status
         run: |
           if grep -q ">FAIL<" agg.html; then
@@ -676,6 +650,12 @@ jobs:
 
               // ✅ ZAP summary
               const zapSummary = fs.readFileSync('zap-summary.html').toString();
+              
+              
+              const aiSummary = (process.env.AI_SUMMARY || "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
 
               // ✅ Page Content
               const CONTENT = `
@@ -765,7 +745,8 @@ jobs:
               ${zapSummary}
 
               <h2>🧠 AI Analysis & Observations</h2>
-              ${process.env.AI_SUMMARY}
+              
+              ${aiSummary}
 
               <h2>📎 Attachments</h2>
               <ac:structured-macro ac:name="attachments"/>`;
