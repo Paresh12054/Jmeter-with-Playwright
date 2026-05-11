@@ -217,7 +217,7 @@ jobs:
         run: |
           mkdir -p jm-graphs
 
-          cp jmeter-report/content/img/*.png jm-graphs/ || true
+          const graphFiles = fs.readdirSync("jm-graphs"); 
 
           echo "Copied JMeter graphs:"
           ls -l jm-graphs
@@ -905,6 +905,10 @@ jobs:
                         <p>
                           Visual graphs generated from JMeter HTML Dashboard.
                         </p>
+              
+                        <p>
+                          Full JMeter dashboard screenshot and individual charts are attached below.
+                        </p>
                       `,
                       representation: "storage"
                     }
@@ -913,12 +917,56 @@ jobs:
               
                 console.log(`JMeter child page created: ${jmChild.id}`);
               
-                // Upload all graph PNGs
-                const graphFiles = fs.readdirSync("jm-graphs");
+                // =====================================================
+                // Upload Full Dashboard Screenshot
+                // =====================================================
+              
+                if (fs.existsSync("jmeter-dashboard-full.png")) {
+              
+                  console.log("Uploading full dashboard screenshot...");
+              
+                  const dashboardBuffer = fs.readFileSync("jmeter-dashboard-full.png");
+              
+                  let form = new FormData();
+              
+                  form.append(
+                    "file",
+                    new Blob([dashboardBuffer], { type: "image/png" }),
+                    "jmeter-dashboard-full.png"
+                  );
+              
+                  const dashboardUpload = await fetch(
+                    `${baseUrl}/rest/api/content/${jmChild.id}/child/attachment`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Authorization": `Basic ${auth}`,
+                        "X-Atlassian-Token": "no-check"
+                      },
+                      body: form
+                    }
+                  );
+              
+                  if (!dashboardUpload.ok) {
+                    throw new Error(await dashboardUpload.text());
+                  }
+              
+                  console.log("Full dashboard screenshot uploaded");
+                }
+              
+                // =====================================================
+                // Upload Individual Graph PNGs
+                // =====================================================
+              
+                const graphFiles = fs.existsSync("jm-graphs")
+                  ? fs.readdirSync("jm-graphs")
+                  : [];
               
                 for (const file of graphFiles) {
               
                   const filePath = `jm-graphs/${file}`;
+              
+                  console.log(`Uploading ${filePath}`);
               
                   const buffer = fs.readFileSync(filePath);
               
@@ -949,12 +997,33 @@ jobs:
                   console.log(`Uploaded ${file}`);
                 }
               
-                // Build embedded image HTML
+                // =====================================================
+                // Build Confluence HTML
+                // =====================================================
+              
                 let graphHtml = `
                   <h1>📈 JMeter Performance Graphs</h1>
-                  <p>Generated from results.jtl</p>
+              
+                  <p>
+                    Generated from <strong>results.jtl</strong> using JMeter HTML Dashboard.
+                  </p>
                 `;
               
+                // Full dashboard image
+                if (fs.existsSync("jmeter-dashboard-full.png")) {
+              
+                  graphHtml += `
+                    <h2>📊 Full Dashboard</h2>
+              
+                    <ac:image ac:width="1600">
+                      <ri:attachment ri:filename="jmeter-dashboard-full.png"/>
+                    </ac:image>
+              
+                    <br/><br/>
+                  `;
+                }
+              
+                // Individual graphs
                 for (const file of graphFiles) {
               
                   graphHtml += `
@@ -968,12 +1037,25 @@ jobs:
                   `;
                 }
               
-                // Get latest version
+                // Attachments section
+                graphHtml += `
+                  <h2>📎 Attachments</h2>
+              
+                  <ac:structured-macro ac:name="attachments"/>
+                `;
+              
+                // =====================================================
+                // Get Latest Version
+                // =====================================================
+              
                 const latestJMPage = await api(
                   `${baseUrl}/rest/api/content/${jmChild.id}?expand=version`
                 );
               
-                // Update page
+                // =====================================================
+                // Update Page with Images
+                // =====================================================
+              
                 await api(
                   `${baseUrl}/rest/api/content/${jmChild.id}`,
                   "PUT",
@@ -993,7 +1075,7 @@ jobs:
                   }
                 );
               
-                console.log("JMeter graph page updated");
+                console.log("JMeter graph page updated successfully");
               }
               
               // ==========================================
