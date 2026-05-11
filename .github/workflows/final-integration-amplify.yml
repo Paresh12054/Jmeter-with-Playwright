@@ -1,4 +1,4 @@
-name: Integration with HTML
+name: Final Integration with Amplify
 
 on:
   workflow_dispatch:
