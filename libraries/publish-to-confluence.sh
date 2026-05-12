@@ -10,7 +10,7 @@ SPACE_KEY="$CONFLUENCE_SPACE_KEY"
 PARENT_ID="6094858"
 INDEX_PAGE_ID="6094858"
 
-AUTH=$(printf "%s:%s" "$EMAIL" "$TOKEN" | base64)
+AUTH=$(echo -n "$EMAIL:$TOKEN" | base64)
 
 NOW=$(date +"%d/%m/%Y %H:%M:%S")
 
@@ -123,13 +123,22 @@ jq -n \
 # ============================================================
 # Create Confluence page
 # ============================================================
+echo "Validating payload.json"
 
-curl -s -X POST \
+cat payload.json
+
+jq . payload.json
+echo "Creating Confluence page..."
+
+curl --fail-with-body -v -X POST \
   "${BASE_URL}/rest/api/content" \
   -H "Authorization: Basic ${AUTH}" \
   -H "Content-Type: application/json" \
   --data @payload.json \
   -o response.json
+
+echo "Response:"
+cat response.json
 
 PAGE_ID=$(jq -r '.id' response.json)
 
