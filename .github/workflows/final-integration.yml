@@ -329,8 +329,7 @@ jobs:
           CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
           CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
       
-        run: |
-          node libraries/publish-to-confluence.js
+        run: bash libraries/publish-to-confluence.sh
 
       - name: Upload Attachments
         run: bash libraries/upload-attachments.sh
