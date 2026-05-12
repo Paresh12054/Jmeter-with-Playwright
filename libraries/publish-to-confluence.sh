@@ -128,13 +128,19 @@ echo "Validating payload.json"
 cat payload.json
 
 jq . payload.json
+
+wc -c payload.json
+
 echo "Creating Confluence page..."
 
-curl --fail-with-body -v -X POST \
+curl --http1.1 \
+  --fail-with-body \
+  -sS \
+  -X POST \
   "${BASE_URL}/rest/api/content" \
   -H "Authorization: Basic ${AUTH}" \
   -H "Content-Type: application/json" \
-  --data @payload.json \
+  --data-binary @payload.json \
   -o response.json
 
 echo "Response:"
