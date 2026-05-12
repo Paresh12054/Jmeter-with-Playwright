@@ -519,14 +519,753 @@ jobs:
           echo "CONCURRENT_USERS=$USERS" >> $GITHUB_ENV
 
       - name: Publish to Confluence
-        env:
-          CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
-          CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
-          CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
-          CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
-      
-        run: |
-          node libraries/publish-to-confluence.js
+        uses: actions/github-script@v7
+        with:
+            script: |
+              const fs = require('fs');
+
+              const baseUrl = process.env.CONFLUENCE_BASE_URL;
+              const email = process.env.CONFLUENCE_EMAIL;
+              const token = process.env.CONFLUENCE_API_TOKEN;
+              const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
+
+              const parentId = "6094858";
+              const indexPageId = "6094858";
+              
+              const auth = Buffer.from(`${email}:${token}`).toString("base64");
+
+              const headers = {
+              "Authorization": `Basic ${auth}`,
+              "Content-Type": "application/json"
+               };
+
+              async function api(url, method = "GET", body = null) {
+              const res = await fetch(url, {
+              method,
+              headers,
+              body: body ? JSON.stringify(body) : null
+              });
+
+              const text = await res.text();
+              if (!res.ok) throw new Error(text);
+
+              return text ? JSON.parse(text) : {};
+              }
+
+              const now = new Date().toLocaleString("en-GB").replace(",", "");
+              
+              const parent = await api(
+              `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
+              );
+
+              let html = parent.body.storage.value;
+
+              // ✅ Extract previous run metrics from parent page
+              
+              let prevAvg = 0;
+              let prevP90 = 0;
+              let hasPrev = false;
+
+              const tableMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
+
+              if (tableMatch && tableMatch[1]) {
+              const rows = tableMatch[1].match(/<tr>([\s\S]*?)<\/tr>/g);
+
+              if (rows && rows.length > 1) {
+              const lastRow = rows[rows.length - 1];
+              const cols = lastRow.match(/<td>(.*?)<\/td>/g);
+
+              if (cols && cols.length >= 5) {
+              prevAvg = parseInt(cols[3].replace(/<[^>]+>/g, ''));
+              prevP90 = parseInt(cols[4].replace(/<[^>]+>/g, ''));
+              hasPrev = true;
+              }
+              }
+              }
+
+              // Deviation
+              let devAvg = 0;
+              let devP90 = 0;
+              let avgColor = "Grey";
+              let p90Color = "Grey";
+              let percentChange = 0;
+
+              if (hasPrev && prevAvg > 0) {
+              devAvg = process.env.TOTAL_AVG - prevAvg;
+              devP90 = process.env.TOTAL_P90 - prevP90;
+
+              avgColor = devAvg < 0 ? "Green" : "Red";
+              p90Color = devP90 < 0 ? "Green" : "Red";
+
+              percentChange = ((devAvg / prevAvg) * 100).toFixed(2);
+              }
+
+              process.env.PREV_AVG = prevAvg;
+              process.env.PREV_P90 = prevP90;
+              process.env.HAS_PREV = hasPrev;
+              process.env.DEV_AVG = devAvg;
+              process.env.DEV_P90 = devP90;
+              process.env.AVG_COLOR = avgColor;
+              process.env.P90_COLOR = p90Color;
+              process.env.PERCENT_CHANGE = percentChange;
+
+              // ✅ Playwright summary rows
+              const pwRows = fs.readFileSync('pw_runs_summary.txt')
+              .toString()
+              .split('\n')
+              .slice(1)
+              .map(line => {
+              if (!line) return "";
+                const [a, b, c, d, e, f] = line.split(',');
+                return `<tr><td>${a}</td><td>${b}</td><td>${c}</td><td>${d}</td><td>${e}</td><td>${f}</td></tr>`;
+              }).join('');
+
+              // ✅ ZAP summary
+              const zapSummary = fs.readFileSync('zap-summary.html').toString();
+              
+              
+              const aiSummary = (process.env.AI_SUMMARY || "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+
+              // ✅ Page Content
+              const CONTENT = `
+              <h1>🚀 Performance & UI Test Report</h1>
+
+              <h2>📊 Test Summary</h2>
+              <table border='1' style='border-collapse: collapse; width: 60%;'>
+              <tr><th>Test Type</th><td>Automation + Load + Security</td></tr>
+              <tr><th>Test Date</th><td>${now}</td></tr>
+              <tr><th>Test Duration</th><td>${process.env.TEST_DURATION}</td></tr>
+              <tr><th>Concurrent Users</th><td>${process.env.CONCURRENT_USERS}</td></tr>
+              <tr><th>Load Test Description</th><td>To perform performance and load testing of the web application using defined concurrent users to evaluate system behavior, response times, and stability under expected and peak load conditions.</td></tr>
+              <tr><th>Automation Test Description</th><td>To validate application functionality and page rendering performance using automated UI tests while simulating real user interactions during background load execution.</td></tr>
+              <tr><th>Security Test Description</th><td>To perform passive security testing using OWASP ZAP Baseline Scan, which analyzes HTTP responses, headers, cookies, and configurations to identify common security vulnerabilities such as missing security headers, insecure cookies, and information disclosure issues without actively attacking the application.</td></tr>
+              </table>
+
+              <h2>📏 SLA Configuration</h2>
+              <table border='1'>
+              <tr><th>Metric</th><th>Threshold</th></tr>
+              <tr><td>Avg (ms)</td><td>${process.env.SLA_AVG}</td></tr>
+              <tr><td>P90 (ms)</td><td>${process.env.SLA_P90}</td></tr>
+              <tr><td>Error %</td><td>${process.env.SLA_ERR}</td></tr>
+               </table>
+
+              <h2>⏱ Execution Timeline</h2>
+              <table border='1'>
+              <tr><th>Type</th><th>Start</th><th>End</th></tr>
+              <tr><td>JMeter</td><td>${fs.readFileSync('jm_start.txt')}</td><td>${fs.readFileSync('jm_end.txt')}</td></tr>
+              <tr><td>Playwright</td><td>${fs.readFileSync('pw_start.txt')}</td><td>${fs.readFileSync('pw_end.txt')}</td></tr>
+              </table>
+
+              <h2>📈 Transaction-Level Aggregate</h2>
+              ${fs.readFileSync('agg.html')}
+
+              <h2>📊 Performance Comparison (vs Previous Run)</h2>
+
+              ${process.env.HAS_PREV === "false" 
+              ? `<p><i>Baseline established in this run. Comparison will be available from next execution.</i></p>` 
+              : ""}
+              
+              <table border='1'>
+              <tr>
+                <th>Metric</th>
+                <th>Previous</th>
+                <th>Current</th>
+                <th>Deviation</th>
+              </tr>
+
+              <tr>
+                <td>Avg (ms)</td>
+                <td>${process.env.HAS_PREV === "false" ? "N/A" : process.env.PREV_AVG}</td>
+                <td>${process.env.TOTAL_AVG}</td>
+                <td>
+                <ac:structured-macro ac:name="status">
+                <ac:parameter ac:name="colour">${process.env.AVG_COLOR}</ac:parameter>
+                <ac:parameter ac:name="title">${process.env.HAS_PREV === "false"
+                ? "N/A"
+                : `${process.env.DEV_AVG} ms (${process.env.PERCENT_CHANGE}%)`}</ac:parameter>
+                </ac:structured-macro>
+                </td>
+              </tr>
+
+              <tr>
+                <td>P90 (ms)</td>
+                <td>${process.env.HAS_PREV === "false" ? "N/A" : process.env.PREV_P90}</td>
+                <td>${process.env.TOTAL_P90}</td>
+                <td>
+                <ac:structured-macro ac:name="status">
+                <ac:parameter ac:name="colour">${process.env.P90_COLOR}</ac:parameter>
+                <ac:parameter ac:name="title">
+                ${process.env.HAS_PREV === "false"
+                ? "N/A"
+                : `${process.env.DEV_P90} ms`}
+                </ac:parameter>
+                </ac:structured-macro>
+                </td>
+              </tr>
+              </table>
+  
+              <h2>🎭 Playwright Summary</h2>
+              <table border='1'>
+              <tr><th>Run</th><th>Start</th><th>End</th><th>Duration</th><th>Passed</th><th>Failed</th></tr>
+              ${pwRows}
+              </table>
+
+              <h2>🔐 Security Summary</h2>
+              ${zapSummary}
+
+              <h2>🧠 AI Analysis & Observations</h2>
+              
+              ${aiSummary}
+
+              <h2>📎 Attachments</h2>
+              <ac:structured-macro ac:name="attachments"/>`;
+
+              const title = `Performance Report - ${now}`;
+
+              // ✅ Create child page
+              const child = await api(`${baseUrl}/rest/api/content`, "POST", {
+              type: "page",
+              title: title,
+              ancestors: [{ id: parentId }],
+              space: { key: spaceKey },
+              body: {
+                storage: {
+                  value: CONTENT,
+                  representation: "storage"
+              }
+              }
+              });
+
+              const link = child._links.base + child._links.webui;
+
+              // ==========================================
+              // Create ZAP Screenshot Child Page
+              // ==========================================
+              
+              if (fs.existsSync("zap-report.png")) {
+              
+                console.log("Creating ZAP screenshot child page...");
+              
+                // Create child page under main report
+                const zapChild = await api(`${baseUrl}/rest/api/content`, "POST", {
+                  type: "page",
+                  title: `ZAP Visual Report - ${now}`,
+                  ancestors: [{ id: child.id }],
+                  space: { key: spaceKey },
+                  body: {
+                    storage: {
+                      value: `
+                        <h1>🔐 ZAP Visual Security Report</h1>
+              
+                        <p>
+                          This page contains the rendered screenshot of the OWASP ZAP HTML report.
+                        </p>
+              
+                        <p>
+                          Image will appear below after attachment upload.
+                        </p>
+                      `,
+                      representation: "storage"
+                    }
+                  }
+                });
+              
+                console.log(`ZAP child page created: ${zapChild.id}`);
+              
+                // Upload PNG attachment
+                const imageBuffer = fs.readFileSync("zap-report.png");
+              
+                const form = new FormData();
+              
+                form.append(
+                  "file",
+                  new Blob([imageBuffer], { type: "image/png" }),
+                  "zap-report.png"
+                );
+              
+                const uploadResponse = await fetch(
+                  `${baseUrl}/rest/api/content/${zapChild.id}/child/attachment`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Authorization": `Basic ${auth}`,
+                      "X-Atlassian-Token": "no-check"
+                    },
+                    body: form
+                  }
+                );
+              
+                if (!uploadResponse.ok) {
+                  throw new Error(await uploadResponse.text());
+                }
+              
+                console.log("ZAP screenshot uploaded");
+              
+                // Get latest page version
+                const latestZapPage = await api(
+                  `${baseUrl}/rest/api/content/${zapChild.id}?expand=version`
+                );
+              
+                // Update page with embedded image
+                await api(
+                  `${baseUrl}/rest/api/content/${zapChild.id}`,
+                  "PUT",
+                  {
+                    id: zapChild.id,
+                    type: "page",
+                    title: latestZapPage.title,
+                    version: {
+                      number: latestZapPage.version.number + 1
+                    },
+                    body: {
+                      storage: {
+                        value: `
+                          <h1>🔐 ZAP Visual Security Report</h1>
+              
+                          <p>
+                            Full rendered screenshot of OWASP ZAP report.
+                          </p>
+              
+                          <ac:image ac:width="1400">
+                            <ri:attachment ri:filename="zap-report.png"/>
+                          </ac:image>
+                        `,
+                        representation: "storage"
+                      }
+                    }
+                  }
+                );
+              
+                console.log("ZAP child page updated with embedded image");
+              }
+              
+              // ==========================================
+              // Create JMeter Graph Child Page
+              // ==========================================
+              
+              if (fs.existsSync("jm-graphs")) {
+              
+                console.log("Creating JMeter graphs child page...");
+              
+                // Create child page
+                const jmChild = await api(`${baseUrl}/rest/api/content`, "POST", {
+                  type: "page",
+                  title: `JMeter Graphs Report - ${now}`,
+                  ancestors: [{ id: child.id }],
+                  space: { key: spaceKey },
+                  body: {
+                    storage: {
+                      value: `
+                        <h1>📈 JMeter Performance Graphs</h1>
+              
+                        <p>
+                          Visual graphs generated from JMeter HTML Dashboard.
+                        </p>
+              
+                        <p>
+                          Full JMeter dashboard screenshot and individual charts are attached below.
+                        </p>
+                      `,
+                      representation: "storage"
+                    }
+                  }
+                });
+              
+                console.log(`JMeter child page created: ${jmChild.id}`);
+              
+                // =====================================================
+                // Upload Full Dashboard Screenshot
+                // =====================================================
+              
+                if (fs.existsSync("jmeter-dashboard-full.png")) {
+              
+                  console.log("Uploading full dashboard screenshot...");
+              
+                  const dashboardBuffer = fs.readFileSync("jmeter-dashboard-full.png");
+              
+                  let form = new FormData();
+              
+                  form.append(
+                    "file",
+                    new Blob([dashboardBuffer], { type: "image/png" }),
+                    "jmeter-dashboard-full.png"
+                  );
+              
+                  const dashboardUpload = await fetch(
+                    `${baseUrl}/rest/api/content/${jmChild.id}/child/attachment`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Authorization": `Basic ${auth}`,
+                        "X-Atlassian-Token": "no-check"
+                      },
+                      body: form
+                    }
+                  );
+              
+                  if (!dashboardUpload.ok) {
+                    throw new Error(await dashboardUpload.text());
+                  }
+              
+                  console.log("Full dashboard screenshot uploaded");
+                }
+              
+                // =====================================================
+                // Upload Individual Graph PNGs
+                // =====================================================
+              
+                const graphFiles = fs.existsSync("jm-graphs")
+                  ? fs.readdirSync("jm-graphs")
+                  : [];
+              
+                for (const file of graphFiles) {
+              
+                  const filePath = `jm-graphs/${file}`;
+              
+                  console.log(`Uploading ${filePath}`);
+              
+                  const buffer = fs.readFileSync(filePath);
+              
+                  const form = new FormData();
+              
+                  form.append(
+                    "file",
+                    new Blob([buffer], { type: "image/png" }),
+                    file
+                  );
+              
+                  const uploadResponse = await fetch(
+                    `${baseUrl}/rest/api/content/${jmChild.id}/child/attachment`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Authorization": `Basic ${auth}`,
+                        "X-Atlassian-Token": "no-check"
+                      },
+                      body: form
+                    }
+                  );
+              
+                  if (!uploadResponse.ok) {
+                    throw new Error(await uploadResponse.text());
+                  }
+              
+                  console.log(`Uploaded ${file}`);
+                }
+              
+                // =====================================================
+                // Build Confluence HTML
+                // =====================================================
+              
+                let graphHtml = `
+                  <h1>📈 JMeter Performance Graphs</h1>
+              
+                  <p>
+                    Generated from <strong>results.jtl</strong> using JMeter HTML Dashboard.
+                  </p>
+                `;
+              
+                // Full dashboard image
+                if (fs.existsSync("jmeter-dashboard-full.png")) {
+              
+                  graphHtml += `
+                    <h2>📊 Full Dashboard</h2>
+              
+                    <ac:image ac:width="1600">
+                      <ri:attachment ri:filename="jmeter-dashboard-full.png"/>
+                    </ac:image>
+              
+                    <br/><br/>
+                  `;
+                }
+              
+                // Individual graphs
+                for (const file of graphFiles) {
+              
+                  graphHtml += `
+                    <h2>${file}</h2>
+              
+                    <ac:image ac:width="1400">
+                      <ri:attachment ri:filename="${file}" />
+                    </ac:image>
+              
+                    <br/><br/>
+                  `;
+                }
+              
+                // Attachments section
+                graphHtml += `
+                  <h2>📎 Attachments</h2>
+              
+                  <ac:structured-macro ac:name="attachments"/>
+                `;
+              
+                // =====================================================
+                // Get Latest Version
+                // =====================================================
+              
+                const latestJMPage = await api(
+                  `${baseUrl}/rest/api/content/${jmChild.id}?expand=version`
+                );
+              
+                // =====================================================
+                // Update Page with Images
+                // =====================================================
+              
+                await api(
+                  `${baseUrl}/rest/api/content/${jmChild.id}`,
+                  "PUT",
+                  {
+                    id: jmChild.id,
+                    type: "page",
+                    title: latestJMPage.title,
+                    version: {
+                      number: latestJMPage.version.number + 1
+                    },
+                    body: {
+                      storage: {
+                        value: graphHtml,
+                        representation: "storage"
+                      }
+                    }
+                  }
+                );
+              
+                console.log("JMeter graph page updated successfully");
+              }
+              
+              // ==========================================
+              // Create Playwright HTML Report Child Page
+              // ==========================================
+              
+              if (fs.existsSync("playwright-report.png")) {
+              
+                console.log("Creating Playwright child page...");
+              
+                // Create child page
+                const pwChild = await api(`${baseUrl}/rest/api/content`, "POST", {
+                  type: "page",
+                  title: `Playwright UI Report - ${now}`,
+                  ancestors: [{ id: child.id }],
+                  space: { key: spaceKey },
+                  body: {
+                    storage: {
+                      value: `
+                        <h1>🎭 Playwright UI Automation Report</h1>
+              
+                        <p>
+                          Visual execution report generated from Playwright HTML Reporter.
+                        </p>
+              
+                        <p>
+                          Full HTML report is attached to this page.
+                        </p>
+                      `,
+                      representation: "storage"
+                    }
+                  }
+                });
+              
+                console.log(`Playwright child page created: ${pwChild.id}`);
+              
+                // Upload Screenshot
+                const imageBuffer = fs.readFileSync("playwright-report.png");
+              
+                let form = new FormData();
+              
+                form.append(
+                  "file",
+                  new Blob([imageBuffer], { type: "image/png" }),
+                  "playwright-report.png"
+                );
+              
+                let uploadResponse = await fetch(
+                  `${baseUrl}/rest/api/content/${pwChild.id}/child/attachment`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Authorization": `Basic ${auth}`,
+                      "X-Atlassian-Token": "no-check"
+                    },
+                    body: form
+                  }
+                );
+              
+                if (!uploadResponse.ok) {
+                  throw new Error(await uploadResponse.text());
+                }
+              
+                console.log("Playwright screenshot uploaded");
+              
+                // Upload ZIP report
+                if (fs.existsSync("playwright-report.zip")) {
+              
+                  const zipBuffer = fs.readFileSync("playwright-report.zip");
+              
+                  form = new FormData();
+              
+                  form.append(
+                    "file",
+                    new Blob([zipBuffer], { type: "application/zip" }),
+                    "playwright-report.zip"
+                  );
+              
+                  uploadResponse = await fetch(
+                    `${baseUrl}/rest/api/content/${pwChild.id}/child/attachment`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Authorization": `Basic ${auth}`,
+                        "X-Atlassian-Token": "no-check"
+                      },
+                      body: form
+                    }
+                  );
+              
+                  if (!uploadResponse.ok) {
+                    throw new Error(await uploadResponse.text());
+                  }
+              
+                  console.log("Playwright ZIP uploaded");
+                }
+              
+                // Get latest version
+                const latestPWPage = await api(
+                  `${baseUrl}/rest/api/content/${pwChild.id}?expand=version`
+                );
+              
+                // Update page with embedded screenshot
+                await api(
+                  `${baseUrl}/rest/api/content/${pwChild.id}`,
+                  "PUT",
+                  {
+                    id: pwChild.id,
+                    type: "page",
+                    title: latestPWPage.title,
+                    version: {
+                      number: latestPWPage.version.number + 1
+                    },
+                    body: {
+                      storage: {
+                        value: `
+                          <h1>🎭 Playwright UI Automation Report</h1>
+              
+                          <p>
+                            Full rendered screenshot of Playwright HTML report.
+                          </p>
+              
+                          <p>
+                            Download attached ZIP for complete interactive report.
+                          </p>
+              
+                          <ac:image ac:width="1400">
+                            <ri:attachment ri:filename="playwright-report.png"/>
+                          </ac:image>
+              
+                          <h2>📎 Attachments</h2>
+                          <ac:structured-macro ac:name="attachments"/>
+                        `,
+                        representation: "storage"
+                      }
+                    }
+                  }
+                );
+              
+                console.log("Playwright page updated");
+              }
+
+              // ✅ Sr.No calculation
+              let match = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
+
+              let count = 0;
+
+              if (match && match[1]) {
+              const rows = match[1].match(/<tr>/g);
+              count = rows ? rows.length - 1 : 0; // exclude header row
+              }
+
+              const srNo = count + 1;
+
+              // ✅ Status
+              const status = process.env.OVERALL_STATUS === "FAIL"
+              ? `<ac:structured-macro ac:name="status">
+              <ac:parameter ac:name="colour">Red</ac:parameter>
+              <ac:parameter ac:name="title">FAIL</ac:parameter>
+              </ac:structured-macro>`
+              : `<ac:structured-macro ac:name="status">
+              <ac:parameter ac:name="colour">Green</ac:parameter>
+              <ac:parameter ac:name="title">SUCCESS</ac:parameter>
+              </ac:structured-macro>`;
+
+              const deviationCell = process.env.HAS_PREV === "false"
+              ? "N/A"
+              : `<ac:structured-macro ac:name="status">
+              <ac:parameter ac:name="colour">${process.env.AVG_COLOR}</ac:parameter>
+              <ac:parameter ac:name="title">${process.env.DEV_AVG} ms (${process.env.PERCENT_CHANGE}%)</ac:parameter>
+              </ac:structured-macro>`;
+
+              const row = `
+              <tr>
+              <td>${srNo}</td>
+              <td>${now}</td>
+              <td><a href="${link}">${title}</a></td>
+              <td>${process.env.TOTAL_AVG} ms</td>
+              <td>${process.env.TOTAL_P90} ms</td>
+              <td>${status}</td>
+              <td>${deviationCell}</td>
+              </tr>`;
+
+              // ✅ Append row safely
+              html = html.includes("</tbody>")
+              ? html.replace("</tbody>", row + "</tbody>")
+              : html + `<table><tbody>
+              <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Avg (ms)</th><th>P90 (ms)</th><th>Status</th><th>Deviation (Avg)</th></tr>
+              ${row}
+              </tbody></table>`;
+              
+              // ✅ Auto re-number Sr.No
+              let counter = 1;
+
+              html = html.replace(
+              /<tbody>([\s\S]*?)<\/tbody>/,
+              (match, tbodyContent) => {
+              const updatedRows = tbodyContent.replace(/<tr>([\s\S]*?)<\/tr>/g, (rowMatch) => {
+
+              // Skip header row
+              if (rowMatch.includes("<th>")) return rowMatch;
+
+              // Replace first <td> (Sr.No)
+              const updatedRow = rowMatch.replace(
+              /<td>.*?<\/td>/,
+              `<td>${counter++}</td>`
+              );
+
+              return updatedRow;
+              });
+
+              return `<tbody>${updatedRows}</tbody>`;
+              }
+              );
+
+              // ✅ Update parent page
+              await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
+              id: indexPageId,
+              type: "page",
+              title: parent.title,
+              version: { number: parent.version.number + 1 },
+              body: {
+                storage: {
+                value: html,
+              representation: "storage"
+              }
+              }
+              });
+
+              // ✅ Export page ID for attachments
+              fs.appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${child.id}\n`);
 
       - name: Upload Attachments
         run: |
