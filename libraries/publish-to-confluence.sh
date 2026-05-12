@@ -2,6 +2,10 @@
 
 set -e
 
+# ============================================================
+# Environment Variables
+# ============================================================
+
 BASE_URL="$CONFLUENCE_BASE_URL"
 EMAIL="$CONFLUENCE_EMAIL"
 TOKEN="$CONFLUENCE_API_TOKEN"
@@ -17,17 +21,51 @@ NOW=$(date +"%d/%m/%Y %H:%M:%S")
 CONTENT_FILE="confluence-content.html"
 
 # ============================================================
-# Read files
+# Validation
 # ============================================================
 
-AGG_HTML=$(cat agg.html)
-ZAP_SUMMARY=$(cat zap-summary.html)
+if [ -z "$BASE_URL" ]; then
+  echo "CONFLUENCE_BASE_URL is missing"
+  exit 1
+fi
 
-PW_ROWS=$(tail -n +2 pw_runs_summary.txt | awk -F',' '
-{
-  printf "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
-  $1,$2,$3,$4,$5,$6
-}')
+if [ -z "$EMAIL" ]; then
+  echo "CONFLUENCE_EMAIL is missing"
+  exit 1
+fi
+
+if [ -z "$TOKEN" ]; then
+  echo "CONFLUENCE_API_TOKEN is missing"
+  exit 1
+fi
+
+if [ -z "$SPACE_KEY" ]; then
+  echo "CONFLUENCE_SPACE_KEY is missing"
+  exit 1
+fi
+
+echo "Using Confluence URL: $BASE_URL"
+
+# ============================================================
+# Read Files Safely
+# ============================================================
+
+AGG_HTML=$(cat agg.html 2>/dev/null || echo "")
+ZAP_SUMMARY=$(cat zap-summary.html 2>/dev/null || echo "")
+
+if [ -f "pw_runs_summary.txt" ]; then
+
+  PW_ROWS=$(tail -n +2 pw_runs_summary.txt | awk -F',' '
+  {
+    printf "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+    $1,$2,$3,$4,$5,$6
+  }')
+
+else
+
+  PW_ROWS=""
+
+fi
 
 AI_SUMMARY=$(echo "${AI_SUMMARY:-}" \
   | sed 's/&/\&amp;/g' \
@@ -95,7 +133,7 @@ EOF
 echo "Confluence HTML generated"
 
 # ============================================================
-# Create JSON payload
+# Create JSON Payload
 # ============================================================
 
 TITLE="Performance Report - ${NOW}"
@@ -121,15 +159,23 @@ jq -n \
 ' > payload.json
 
 # ============================================================
-# Create Confluence page
+# Validate Payload
 # ============================================================
-echo "Validating payload.json"
 
-cat payload.json
+echo "===================================="
+echo "Validating payload.json"
+echo "===================================="
 
 jq . payload.json
 
+echo "Payload size:"
 wc -c payload.json
+
+echo "===================================="
+
+# ============================================================
+# Create Confluence Page
+# ============================================================
 
 echo "Creating Confluence page..."
 
@@ -143,15 +189,25 @@ curl --http1.1 \
   --data-binary @payload.json \
   -o response.json
 
-echo "Response:"
+echo "===================================="
+echo "Confluence API Response"
+echo "===================================="
+
 cat response.json
 
-PAGE_ID=$(jq -r '.id' response.json)
+echo "===================================="
+
+PAGE_ID=$(jq -r '.id // empty' response.json)
+
+if [ -z "$PAGE_ID" ]; then
+  echo "Failed to create Confluence page"
+  exit 1
+fi
 
 echo "Confluence page created: ${PAGE_ID}"
 
 # ============================================================
-# Upload attachments
+# Upload Attachments
 # ============================================================
 
 upload_file() {
@@ -162,13 +218,21 @@ upload_file() {
 
     echo "Uploading $FILE"
 
-    curl -s -X POST \
+    curl --http1.1 \
+      --fail-with-body \
+      -sS \
+      -X POST \
       "${BASE_URL}/rest/api/content/${PAGE_ID}/child/attachment" \
       -H "Authorization: Basic ${AUTH}" \
       -H "X-Atlassian-Token: no-check" \
       -F "file=@${FILE}"
 
     echo "$FILE uploaded"
+
+  else
+
+    echo "$FILE not found"
+
   fi
 }
 
@@ -178,7 +242,7 @@ upload_file "playwright-report.zip"
 upload_file "jmeter-dashboard-full.png"
 
 # ============================================================
-# Upload all JMeter graph PNGs
+# Upload JMeter Graph PNGs
 # ============================================================
 
 if [ -d "jm-graphs" ]; then
@@ -191,9 +255,13 @@ if [ -d "jm-graphs" ]; then
 fi
 
 # ============================================================
-# Export Page ID
+# Export PAGE_ID
 # ============================================================
 
-echo "PAGE_ID=${PAGE_ID}" >> "$GITHUB_ENV"
+if [ -n "$GITHUB_ENV" ]; then
+  echo "PAGE_ID=${PAGE_ID}" >> "$GITHUB_ENV"
+fi
 
+echo "===================================="
 echo "Confluence publish completed"
+echo "===================================="
