@@ -323,7 +323,7 @@ jobs:
           echo "CONCURRENT_USERS=$USERS" >> $GITHUB_ENV
 
       - name: Publish to Confluence
-        run: bash libraries/publish-confluence.sh
+        run: bash libraries/publish-to-confluence.sh
 
       - name: Upload Attachments
         run: bash libraries/upload-attachments.sh
