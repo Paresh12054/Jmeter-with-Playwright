@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Give execute permission
+        run: chmod +x libraries/*.sh
+
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq zip
 
@@ -23,20 +26,20 @@ jobs:
         with:
           node-version: 18
 
-      - run: npm install form-data playwright
-      - run: npx playwright install --with-deps
+      - name: Install Playwright
+        run: bash libraries/install-playwright.sh
 
       - name: Install JMeter
-        run: |
-          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.tgz
-          tar -xzf apache-jmeter-5.6.3.tgz
-          mv apache-jmeter-5.6.3 jmeter
+        run:  bash libraries/install-jmeter.sh
+
+      - name: Install ZAP
+        run: bash libraries/install-zap.sh
 
       - name: Load SLA Config
         run: |
-          echo "SLA_AVG=$(jq '.avg_ms' config/sla.json)" >> $GITHUB_ENV
-          echo "SLA_P90=$(jq '.p90_ms' config/sla.json)" >> $GITHUB_ENV
-          echo "SLA_ERR=$(jq '.error_percent' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_AVG=$(jq -r '.avg_ms' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_P90=$(jq -r '.p90_ms' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_ERR=$(jq -r '.error_percent' config/sla.json)" >> $GITHUB_ENV
 
       - name: Start JMeter
         run: |
@@ -45,53 +48,61 @@ jobs:
           echo $! > jmeter.pid
 
       - name: Run Playwright periodically
+        shell: bash
         run: |
           mkdir -p pw-results
           date +"%Y-%m-%d %H:%M:%S" > pw_start.txt
-
+      
           END=$((SECONDS+180))
           PASSED=0
           FAILED=0
-
+      
           RUN_INDEX=1
           RUN_SUMMARY_FILE=pw_runs_summary.txt
+      
           echo "Run,Start,End,Duration(sec),Passed,Failed" > $RUN_SUMMARY_FILE
-
+      
           while [ $SECONDS -lt $END ]; do
+      
             TS_START=$(date +"%Y-%m-%d %H:%M:%S")
             START_SEC=$(date +%s)
-
+      
             TS=$(date +"%Y-%m-%d_%H-%M-%S")
             FILE="pw-results/result-$TS.json"
-
+      
             REPORT_DIR="playwright-report-$RUN_INDEX"
-
-            OUTPUT=$(PLAYWRIGHT_HTML_REPORT=$REPORT_DIR \
-              npx playwright test tests/Demo1.spec.ts \
-              --reporter=json,html || true)
-            echo "$OUTPUT" > "$FILE"
-
+      
+            PLAYWRIGHT_HTML_REPORT=$REPORT_DIR \
+            npx playwright test tests/Demo1.spec.ts \
+              --reporter=json,html \
+              > "$FILE" || true
+      
             END_SEC=$(date +%s)
             TS_END=$(date +"%Y-%m-%d %H:%M:%S")
-
+      
             DURATION=$((END_SEC - START_SEC))
-
+      
             if [ -s "$FILE" ]; then
               P=$(jq '[.. | objects | select(.status=="passed")] | length' "$FILE")
               F=$(jq '[.. | objects | select(.status=="failed")] | length' "$FILE")
+      
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
             else
               P=0
               F=0
             fi
-
+      
             echo "$RUN_INDEX,$TS_START,$TS_END,$DURATION,$P,$F" >> $RUN_SUMMARY_FILE
+      
             RUN_INDEX=$((RUN_INDEX+1))
+      
             sleep 90
+      
           done
-
+      
           date +"%Y-%m-%d %H:%M:%S" > pw_end.txt
+      
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
 
@@ -149,8 +160,7 @@ jobs:
           zip -r playwright-report.zip playwright-report*
 
       - name: Generate JMeter HTML Report
-        run: |
-          ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
+        run: bash libraries/generate-jmeter-report.sh
 
       - name: Generate JMeter Dashboard Screenshots
         run: |
@@ -292,35 +302,7 @@ jobs:
           EOF
 
       - name: Generate ZAP Summary
-        run: |
-          if [ -f zap-report.json ]; then
-            FAIL=$(jq '.site[].alerts[] | select(.riskcode=="3")' zap-report.json | wc -l)
-            WARN=$(jq '.site[].alerts[] | select(.riskcode=="2")' zap-report.json | wc -l)
-            if [ "$FAIL" -gt 0 ]; then
-              STATUS="FAIL"
-              COLOR="Red"
-            else
-              STATUS="PASS"
-              COLOR="Green"
-            fi
-          else
-            STATUS="NO REPORT"
-            COLOR="Yellow"
-            FAIL=0
-            WARN=0
-          fi
-          echo "<table border='1'>
-          <tr><th>Security Check</th><th>Status</th><th>High</th><th>Medium</th></tr>
-          <tr>
-            <td>OWASP ZAP</td>
-            <td><ac:structured-macro ac:name=\"status\">
-              <ac:parameter ac:name=\"colour\">$COLOR</ac:parameter>
-              <ac:parameter ac:name=\"title\">$STATUS</ac:parameter>
-            </ac:structured-macro></td>
-            <td>$FAIL</td>
-            <td>$WARN</td>
-          </tr>
-          </table>" > zap-summary.html
+        run: bash libraries/generate-zap-summary.sh
 
       - name: Generate Aggregate Table
         run: |
@@ -447,31 +429,7 @@ jobs:
              echo "</table>" >> agg.html
 
       - name: Generate JSON Summary for AI
-        run: |
-          awk -F',' '
-          NR>1 {
-          label=$3
-          success=tolower($8)
-          gsub(/\r/,"",success)
-
-          if (label ~ /^PT[0-9]+_/) {
-          total[label]++
-          if (success == "false" || success == "0") fail[label]++
-          }
-          }
-          END {
-            printf "{ \"transactions\": ["
-            first=1
-          for (l in total) {
-            if (!first) printf ","
-            printf "{ \"name\":\"%s\", \"count\":%d, \"errors\":%d }",
-            l, total[l], (fail[l] ? fail[l] : 0)
-            first=0
-          }
-          printf "], \"total_requests\": %d }\n", NR-1
-          }' results.jtl > ai_summary.json
-
-          cat ai_summary.json
+        run: bash libraries/prepare-ai-summary.sh
 
       - name: Analyze with OpenAI
         env:
