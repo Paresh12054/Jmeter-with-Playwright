@@ -19,6 +19,23 @@ jobs:
       - name: Give execute permission
         run: chmod +x libraries/*.sh
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      
+      - name: Cache JMeter
+        id: cache-jmeter
+        uses: actions/cache@v4
+        with:
+          path: jmeter
+          key: jmeter-5.6.3
+      
+      - name: Install JMeter
+        if: steps.cache-jmeter.outputs.cache-hit != 'true'
+        run: bash libraries/install-jmeter.sh
+
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq zip
 
@@ -28,9 +45,6 @@ jobs:
 
       - name: Install Playwright
         run: bash libraries/install-playwright.sh
-
-      - name: Install JMeter
-        run:  bash libraries/install-jmeter.sh
 
       - name: Install ZAP
         run: bash libraries/install-zap.sh
