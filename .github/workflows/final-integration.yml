@@ -1,4 +1,4 @@
-name: Final Integration
+name: Integration with Library
 
 on:
   workflow_dispatch:
@@ -16,6 +16,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Give execute permission
+        run: chmod +x libraries/*.sh
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      
+      - name: Cache JMeter
+        id: cache-jmeter
+        uses: actions/cache@v4
+        with:
+          path: jmeter
+          key: jmeter-5.6.3
+      
+      - name: Install JMeter
+        if: steps.cache-jmeter.outputs.cache-hit != 'true'
+        run: bash libraries/install-jmeter.sh
+
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq zip
 
@@ -23,20 +43,17 @@ jobs:
         with:
           node-version: 18
 
-      - run: npm install
-      - run: npx playwright install --with-deps
+      - name: Install Playwright
+        run: bash libraries/install-playwright.sh
 
-      - name: Install JMeter
-        run: |
-          wget https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.tgz
-          tar -xzf apache-jmeter-5.6.3.tgz
-          mv apache-jmeter-5.6.3 jmeter
+      - name: Install ZAP
+        run: bash libraries/install-zap.sh
 
       - name: Load SLA Config
         run: |
-          echo "SLA_AVG=$(jq '.avg_ms' config/sla.json)" >> $GITHUB_ENV
-          echo "SLA_P90=$(jq '.p90_ms' config/sla.json)" >> $GITHUB_ENV
-          echo "SLA_ERR=$(jq '.error_percent' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_AVG=$(jq -r '.avg_ms' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_P90=$(jq -r '.p90_ms' config/sla.json)" >> $GITHUB_ENV
+          echo "SLA_ERR=$(jq -r '.error_percent' config/sla.json)" >> $GITHUB_ENV
 
       - name: Start JMeter
         run: |
@@ -45,61 +62,159 @@ jobs:
           echo $! > jmeter.pid
 
       - name: Run Playwright periodically
+        shell: bash
         run: |
           mkdir -p pw-results
           date +"%Y-%m-%d %H:%M:%S" > pw_start.txt
-
+      
           END=$((SECONDS+180))
           PASSED=0
           FAILED=0
-
+      
           RUN_INDEX=1
           RUN_SUMMARY_FILE=pw_runs_summary.txt
+      
           echo "Run,Start,End,Duration(sec),Passed,Failed" > $RUN_SUMMARY_FILE
-
+      
           while [ $SECONDS -lt $END ]; do
+      
             TS_START=$(date +"%Y-%m-%d %H:%M:%S")
             START_SEC=$(date +%s)
-
+      
             TS=$(date +"%Y-%m-%d_%H-%M-%S")
             FILE="pw-results/result-$TS.json"
-
-            OUTPUT=$(npx playwright test tests/Demo1.spec.ts --reporter=json || true)
-            echo "$OUTPUT" > "$FILE"
-
+      
+            REPORT_DIR="playwright-report-$RUN_INDEX"
+      
+            PLAYWRIGHT_HTML_REPORT=$REPORT_DIR \
+            npx playwright test tests/Demo1.spec.ts \
+              --reporter=json,html \
+              > "$FILE" || true
+      
             END_SEC=$(date +%s)
             TS_END=$(date +"%Y-%m-%d %H:%M:%S")
-
+      
             DURATION=$((END_SEC - START_SEC))
-
+      
             if [ -s "$FILE" ]; then
               P=$(jq '[.. | objects | select(.status=="passed")] | length' "$FILE")
               F=$(jq '[.. | objects | select(.status=="failed")] | length' "$FILE")
+      
               PASSED=$((PASSED + P))
               FAILED=$((FAILED + F))
             else
               P=0
               F=0
             fi
-
+      
             echo "$RUN_INDEX,$TS_START,$TS_END,$DURATION,$P,$F" >> $RUN_SUMMARY_FILE
+      
             RUN_INDEX=$((RUN_INDEX+1))
+      
             sleep 90
+      
           done
-
+      
           date +"%Y-%m-%d %H:%M:%S" > pw_end.txt
+      
           echo $PASSED > pw_passed.txt
           echo $FAILED > pw_failed.txt
+
+      - name: Generate Playwright HTML Screenshot
+        run: bash libraries/generate-playwright-screenshot.sh
 
       - name: Stop JMeter
         run: |
           kill $(cat jmeter.pid) || true
           date +"%Y-%m-%d %H:%M:%S" > jm_end.txt
 
-      - name: Generate JMeter HTML Report
+      - name: Zip Playwright HTML Report
         run: |
-          ./jmeter/bin/jmeter -g results.jtl -o jmeter-report
+          zip -r playwright-report.zip playwright-report*
 
+      - name: Generate JMeter HTML Report
+        run: bash libraries/generate-jmeter-report.sh
+
+      - name: Generate JMeter Dashboard Screenshots
+        run: |
+          node <<'EOF'
+          const { chromium } = require('playwright');
+          const path = require('path');
+          const fs = require('fs');
+      
+          (async () => {
+      
+            const browser = await chromium.launch({
+              headless: true
+            });
+      
+            const page = await browser.newPage({
+              viewport: {
+                width: 1600,
+                height: 1200
+              }
+            });
+      
+            const reportPath =
+              'file://' + path.resolve('jmeter-report/index.html');
+      
+            console.log("Opening JMeter dashboard...");
+      
+            await page.goto(reportPath, {
+              waitUntil: 'networkidle',
+              timeout: 120000
+            });
+      
+            // Wait for graphs to render
+            await page.waitForTimeout(5000);
+      
+            // Full dashboard screenshot
+            await page.screenshot({
+              path: 'jmeter-dashboard-full.png',
+              fullPage: true
+            });
+      
+            console.log("Full dashboard screenshot created");
+      
+            // Create graph folder
+            if (!fs.existsSync('jm-graphs')) {
+              fs.mkdirSync('jm-graphs');
+            }
+      
+            // Capture chart canvases
+            const charts = await page.locator('canvas').all();
+      
+            console.log(`Found ${charts.length} charts`);
+            if (charts.length === 0) {
+              console.log("No charts found in dashboard");
+            }
+            for (let i = 0; i < charts.length; i++) {
+      
+              try {
+      
+                const chartPath = `jm-graphs/chart-${i + 1}.png`;
+      
+                await charts[i].screenshot({
+                  path: chartPath
+                });
+      
+                console.log(`Saved ${chartPath}`);
+      
+              } catch (err) {
+      
+                console.log(`Failed chart ${i + 1}: ${err.message}`);
+      
+              }
+            }
+      
+            await browser.close();
+      
+            console.log("JMeter screenshots generation completed");
+      
+          })();
+          EOF
+
+      
       - name: Prepare JTL for AI
         run: |
           echo "Preparing JTL sample for AI..."
@@ -122,247 +237,56 @@ jobs:
             -I || true
           ls -l zap-report.*
 
+      - name: Generate ZAP Screenshot
+        run: bash libraries/generate-zap-screenshot.sh
+
       - name: Generate ZAP Summary
-        run: |
-          if [ -f zap-report.json ]; then
-            FAIL=$(jq '.site[].alerts[] | select(.riskcode=="3")' zap-report.json | wc -l)
-            WARN=$(jq '.site[].alerts[] | select(.riskcode=="2")' zap-report.json | wc -l)
-            if [ "$FAIL" -gt 0 ]; then
-              STATUS="FAIL"
-              COLOR="Red"
-            else
-              STATUS="PASS"
-              COLOR="Green"
-            fi
-          else
-            STATUS="NO REPORT"
-            COLOR="Yellow"
-            FAIL=0
-            WARN=0
-          fi
-          echo "<table border='1'>
-          <tr><th>Security Check</th><th>Status</th><th>High</th><th>Medium</th></tr>
-          <tr>
-            <td>OWASP ZAP</td>
-            <td><ac:structured-macro ac:name=\"status\">
-              <ac:parameter ac:name=\"colour\">$COLOR</ac:parameter>
-              <ac:parameter ac:name=\"title\">$STATUS</ac:parameter>
-            </ac:structured-macro></td>
-            <td>$FAIL</td>
-            <td>$WARN</td>
-          </tr>
-          </table>" > zap-summary.html
+        run: bash libraries/generate-zap-summary.sh
 
       - name: Generate Aggregate Table
-        run: |
-          echo "<table border='1' style='border-collapse: collapse;'>" > agg.html
-          echo "<tr>
-          <th>Transaction</th>
-          <th>Total</th>
-          <th>Avg (ms)</th>
-          <th>P90 (ms)</th>
-          <th>P95 (ms)</th>
-          <th>Error %</th>
-          <th>Avg SLA</th>
-          <th>P90 SLA</th>
-          <th>Overall SLA</th>
-          </tr>" >> agg.html
-          awk -v sla_avg="$SLA_AVG" -v sla_p90="$SLA_P90" -F',' '
-          NR>1 {
-            label=$3
-            success=tolower($8)
-            gsub(/\r/,"",success)
-            gsub(/^[ \t"]+|[ \t"]+$/, "", success)
-            if (label ~ /^PT[0-9]+_/) {
-              total[label]++
-              sum[label]+=$2
-              if (success == "false" || success == "0") fail[label]++
-              times[label]=times[label] " " $2
-            }
-          }
-          END {
-            # 🔹 Transaction-level rows
-            for (l in total) {
-            n=split(times[l], arr, " ")
-            idx=0
-            delete clean
-            for(i=1;i<=n;i++){
-            if(arr[i]!="") clean[++idx]=arr[i]
-            }
-            n=idx
+        run: bash libraries/generate-aggregate-table.sh
 
-            for(i=1;i<=n;i++){
-            for(j=i+1;j<=n;j++){
-            if(clean[i]>clean[j]){
-            tmp=clean[i]; clean[i]=clean[j]; clean[j]=tmp
-            }
-          }
-          }
-
-            p90_index = int((n*90 + 99)/100)
-            p95_index = int((n*95 + 99)/100)
-
-            p90 = clean[p90_index]
-            p95 = clean[p95_index]
-
-            avg = int(sum[l]/total[l])
-            err = (total[l] > 0) ? (fail[l]/total[l])*100 : 0
-
-            avg_sla = (avg <= sla_avg) ? "PASS" : "FAIL"
-            p90_sla = (p90 <= sla_p90) ? "PASS" : "FAIL"
-            overall = (avg_sla=="PASS" && p90_sla=="PASS") ? "PASS" : "FAIL"
-
-            printf "<tr>"
-            printf "<td>%s</td>", l
-            printf "<td>%d</td>", total[l]
-            printf "<td>%d</td>", avg
-            printf "<td>%d</td>", p90
-            printf "<td>%d</td>", p95
-            printf "<td>%.2f</td>", err
-
-            printf "<td>%s</td>", (avg_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
-
-            printf "<td>%s</td>", (p90_sla=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
-  
-            printf "<td>%s</td>", (overall=="PASS") ? "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Green</ac:parameter><ac:parameter ac:name=\"title\">PASS</ac:parameter></ac:structured-macro>" : "<ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"colour\">Red</ac:parameter><ac:parameter ac:name=\"title\">FAIL</ac:parameter></ac:structured-macro>"
-
-            printf "</tr>\n"
-            }
-
-            # 🔹 TOTAL CALCULATION
-            total_all=0
-            sum_all=0
-            fail_all=0
-            times_all=""
-
-            for (l in total) {
-            total_all += total[l]
-            sum_all += sum[l]
-            fail_all += (fail[l] ? fail[l] : 0)
-            times_all = times_all " " times[l]
-          }
-
-            n=split(times_all, arr, " ")
-  
-            idx=0
-            delete clean_all
-            for(i=1;i<=n;i++){
-            if(arr[i]!="") clean_all[++idx]=arr[i]
-          }
-            n=idx
-
-            for(i=1;i<=n;i++){
-            for(j=i+1;j<=n;j++){
-            if(clean_all[i]>clean_all[j]){
-            tmp=clean_all[i]; clean_all[i]=clean_all[j]; clean_all[j]=tmp
-            }
-            }
-            }
-
-            p90_index = int((n*90 + 99)/100)
-            p90_all = clean_all[p90_index]
-
-            avg_all = int(sum_all/total_all)
-            err_all = (total_all > 0) ? (fail_all/total_all)*100 : 0
-    
-            printf "<tr style=\"font-weight:bold;background:#f2f2f2\">"
-            printf "<td>TOTAL</td>"
-            printf "<td>%d</td>", total_all
-            printf "<td>%d</td>", avg_all
-            printf "<td>%d</td>", p90_all
-            printf "<td>-</td>"
-            printf "<td>%.2f</td>", err_all
-            printf "<td>-</td><td>-</td><td>-</td>"
-            printf "</tr>\n"
-            }' results.jtl >> agg.html
-             echo "</table>" >> agg.html
+      - name: Generate JSON Summary for AI
+        run: bash libraries/prepare-ai-summary.sh
 
       - name: Analyze with OpenAI
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AMPLIFY_TOKEN: ${{ secrets.AMPLIFY_TOKEN }}
+          AMPLIFY_BASE_URL: https://amplify.planittesting.com
         run: |
           echo "Calling OpenAI for analysis..."
-
                  
-          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
-            -H "Authorization: Bearer $OPENAI_API_KEY" \
+          RESPONSE=$(curl -s \
+            -X POST "${AMPLIFY_BASE_URL}/external/api/completion_prompt" \
+            -H "token: ${AMPLIFY_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$(jq -n \
-            --rawfile data jtl_sample.txt \
+            --rawfile data ai_summary.json \
             '{
-          model: "gpt-4o-mini",
-          messages: [
+            messages: [
             {
               role: "system",
-              content: "You are a performance testing expert."
+              content: "You are a performance testing expert. Analyze JMeter results and provide summary, observations, SLA status, and recommendations.Use ONLY the provided data. Do NOT infer or estimate request counts. All totals must match the input exactly."
             },
             {
               role: "user",
-              "content": ("Analyze the following JMeter results and return ONLY valid JSON.
+              content: ("Analyze the following performance test results (JSON format). Use the request counts exactly as provided. Do not estimate.\n\n" + $data)
+            }
+          ]
+          }')")
 
-              IMPORTANT:
-              - Do NOT include any text before or after JSON
-              - Do NOT use markdown
-              - Output must be pure JSON
+          echo "$RESPONSE" > amplify_response.json 
+          echo "===== Amplify RAW RESPONSE =====" 
+          cat amplify_response.json 
+          # Try extracting response safely AI_OUTPUT=$(jq -r '.output // .response // .message // .' amplify_response.json) 
+           AI_OUTPUT=$(jq -r '.assistant_resp // .output // .response // .' amplify_response.json)
 
-              Format:
-              {
-                \"summary\": \"string\",
-                \"observations\": \"string\",
-                \"sla_status\": \"string\",
-                \"recommendations\": \"string\"
-              }
-
-              If data is unclear, still populate all fields with best possible insights.
-
-              JMeter Data:\n\($data)")
-              }
-          ],
-          temperature: 0.2
-            }')")
-  
-            echo "$RESPONSE" > ai_response.json
-                       
-            echo "Raw AI response:"
-            cat ai_response.json
-
-            AI_CONTENT=$(jq -r '.choices[0].message.content' ai_response.json)
-            echo "$AI_CONTENT" | sed -n '/{/,/}/p' > parsed_ai.json
-
-            if ! jq empty parsed_ai.json 2>/dev/null; then
-              echo "AI returned invalid JSON. Failing pipeline."
-              exit 1
-            fi
-
-          SUMMARY=$(jq -r '.summary // "No summary generated"' parsed_ai.json)
-          OBSERVATIONS=$(jq -r '.observations // "No observations generated"' parsed_ai.json)
-          SLA=$(jq -r '.sla_status // "Unknown"' parsed_ai.json)
-          RECOMMENDATIONS=$(jq -r '.recommendations // "No recommendations generated"' parsed_ai.json)
-          
-          echo "===== AI RAW CONTENT ====="
-          echo "$AI_CONTENT"
+          echo "$AI_OUTPUT" > ai_summary.txt
 
           echo "AI_SUMMARY<<EOF" >> $GITHUB_ENV
-          echo "$SUMMARY" >> $GITHUB_ENV
+          cat ai_summary.txt >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
-
-          echo "AI_OBSERVATIONS<<EOF" >> $GITHUB_ENV
-          echo "$OBSERVATIONS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-          echo "AI_SLA<<EOF" >> $GITHUB_ENV
-          echo "$SLA" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-          echo "AI_RECOMMENDATIONS<<EOF" >> $GITHUB_ENV
-          echo "$RECOMMENDATIONS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-          
-          echo "===== FULL API RESPONSE ====="
-          cat ai_response.json
-
-          echo "AI analysis completed successfully"
-
+        
       - name: Extract TOTAL Metrics
         run: |
           TOTAL_ROW=$(grep "TOTAL" agg.html)
@@ -373,37 +297,7 @@ jobs:
           echo "TOTAL_AVG=$TOTAL_AVG" >> $GITHUB_ENV
           echo "TOTAL_P90=$TOTAL_P90" >> $GITHUB_ENV
 
-                     
-      - name: Calculate Deviation
-        run: |
-          if [ "$HAS_PREV" = "false" ]; then
-          echo "DEV_AVG=0" >> $GITHUB_ENV
-          echo "DEV_P90=0" >> $GITHUB_ENV
-          echo "AVG_COLOR=Grey" >> $GITHUB_ENV
-          echo "P90_COLOR=Grey" >> $GITHUB_ENV
-          echo "DEV_LABEL=N/A" >> $GITHUB_ENV
-          else
-          DEV_AVG=$((TOTAL_AVG - PREV_AVG))
-          DEV_P90=$((TOTAL_P90 - PREV_P90))
-
-          echo "DEV_AVG=$DEV_AVG" >> $GITHUB_ENV
-          echo "DEV_P90=$DEV_P90" >> $GITHUB_ENV
-
-          if [ "$DEV_AVG" -lt 0 ]; then
-            echo "AVG_COLOR=Green" >> $GITHUB_ENV
-          else
-            echo "AVG_COLOR=Red" >> $GITHUB_ENV
-          fi
-
-          if [ "$DEV_P90" -lt 0 ]; then
-            echo "P90_COLOR=Green" >> $GITHUB_ENV
-          else
-            echo "P90_COLOR=Red" >> $GITHUB_ENV
-          fi
-
-            echo "DEV_LABEL=${DEV_AVG} ms" >> $GITHUB_ENV
-          fi
-
+                    
       - name: Evaluate Overall SLA Status
         run: |
           if grep -q ">FAIL<" agg.html; then
@@ -429,337 +323,7 @@ jobs:
           echo "CONCURRENT_USERS=$USERS" >> $GITHUB_ENV
 
       - name: Publish to Confluence
-        uses: actions/github-script@v7
-        with:
-            script: |
-              const fs = require('fs');
-
-              const baseUrl = process.env.CONFLUENCE_BASE_URL;
-              const email = process.env.CONFLUENCE_EMAIL;
-              const token = process.env.CONFLUENCE_API_TOKEN;
-              const spaceKey = process.env.CONFLUENCE_SPACE_KEY;
-
-              const parentId = "6094858";
-              const indexPageId = "6094858";
-              
-              const auth = Buffer.from(`${email}:${token}`).toString("base64");
-
-              const headers = {
-              "Authorization": `Basic ${auth}`,
-              "Content-Type": "application/json"
-               };
-
-              async function api(url, method = "GET", body = null) {
-              const res = await fetch(url, {
-              method,
-              headers,
-              body: body ? JSON.stringify(body) : null
-              });
-
-              const text = await res.text();
-              if (!res.ok) throw new Error(text);
-
-              return text ? JSON.parse(text) : {};
-              }
-
-              const now = new Date().toLocaleString("en-GB").replace(",", "");
-              
-              const parent = await api(
-              `${baseUrl}/rest/api/content/${indexPageId}?expand=body.storage,version`
-              );
-
-              let html = parent.body.storage.value;
-
-              // ✅ Extract previous run metrics from parent page
-              
-              let prevAvg = 0;
-              let prevP90 = 0;
-              let hasPrev = false;
-
-              const tableMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
-
-              if (tableMatch && tableMatch[1]) {
-              const rows = tableMatch[1].match(/<tr>([\s\S]*?)<\/tr>/g);
-
-              if (rows && rows.length > 1) {
-              const lastRow = rows[rows.length - 1];
-              const cols = lastRow.match(/<td>(.*?)<\/td>/g);
-
-              if (cols && cols.length >= 5) {
-              prevAvg = parseInt(cols[3].replace(/<[^>]+>/g, ''));
-              prevP90 = parseInt(cols[4].replace(/<[^>]+>/g, ''));
-              hasPrev = true;
-              }
-              }
-              }
-
-              // Deviation
-              let devAvg = 0;
-              let devP90 = 0;
-              let avgColor = "Grey";
-              let p90Color = "Grey";
-              let percentChange = 0;
-
-              if (hasPrev && prevAvg > 0) {
-              devAvg = process.env.TOTAL_AVG - prevAvg;
-              devP90 = process.env.TOTAL_P90 - prevP90;
-
-              avgColor = devAvg < 0 ? "Green" : "Red";
-              p90Color = devP90 < 0 ? "Green" : "Red";
-
-              percentChange = ((devAvg / prevAvg) * 100).toFixed(2);
-              }
-
-              process.env.PREV_AVG = prevAvg;
-              process.env.PREV_P90 = prevP90;
-              process.env.HAS_PREV = hasPrev;
-              process.env.DEV_AVG = devAvg;
-              process.env.DEV_P90 = devP90;
-              process.env.AVG_COLOR = avgColor;
-              process.env.P90_COLOR = p90Color;
-              process.env.PERCENT_CHANGE = percentChange;
-
-              // ✅ Playwright summary rows
-              const pwRows = fs.readFileSync('pw_runs_summary.txt')
-              .toString()
-              .split('\n')
-              .slice(1)
-              .map(line => {
-              if (!line) return "";
-                const [a, b, c, d, e, f] = line.split(',');
-                return `<tr><td>${a}</td><td>${b}</td><td>${c}</td><td>${d}</td><td>${e}</td><td>${f}</td></tr>`;
-              }).join('');
-
-              // ✅ ZAP summary
-              const zapSummary = fs.readFileSync('zap-summary.html').toString();
-
-              // ✅ Page Content
-              const CONTENT = `
-              <h1>🚀 Performance & UI Test Report</h1>
-
-              <h2>📊 Test Summary</h2>
-              <table border='1' style='border-collapse: collapse; width: 60%;'>
-              <tr><th>Test Type</th><td>Automation + Load + Security</td></tr>
-              <tr><th>Test Date</th><td>${now}</td></tr>
-              <tr><th>Test Duration</th><td>${process.env.TEST_DURATION}</td></tr>
-              <tr><th>Concurrent Users</th><td>${process.env.CONCURRENT_USERS}</td></tr>
-              <tr><th>Load Test Description</th><td>To perform performance and load testing of the web application using defined concurrent users to evaluate system behavior, response times, and stability under expected and peak load conditions.</td></tr>
-              <tr><th>Automation Test Description</th><td>To validate application functionality and page rendering performance using automated UI tests while simulating real user interactions during background load execution.</td></tr>
-              <tr><th>Security Test Description</th><td>To perform passive security testing using OWASP ZAP Baseline Scan, which analyzes HTTP responses, headers, cookies, and configurations to identify common security vulnerabilities such as missing security headers, insecure cookies, and information disclosure issues without actively attacking the application.</td></tr>
-              </table>
-
-              <h2>📏 SLA Configuration</h2>
-              <table border='1'>
-              <tr><th>Metric</th><th>Threshold</th></tr>
-              <tr><td>Avg (ms)</td><td>${process.env.SLA_AVG}</td></tr>
-              <tr><td>P90 (ms)</td><td>${process.env.SLA_P90}</td></tr>
-              <tr><td>Error %</td><td>${process.env.SLA_ERR}</td></tr>
-               </table>
-
-              <h2>⏱ Execution Timeline</h2>
-              <table border='1'>
-              <tr><th>Type</th><th>Start</th><th>End</th></tr>
-              <tr><td>JMeter</td><td>${fs.readFileSync('jm_start.txt')}</td><td>${fs.readFileSync('jm_end.txt')}</td></tr>
-              <tr><td>Playwright</td><td>${fs.readFileSync('pw_start.txt')}</td><td>${fs.readFileSync('pw_end.txt')}</td></tr>
-              </table>
-
-              <h2>📈 Transaction-Level Aggregate</h2>
-              ${fs.readFileSync('agg.html')}
-
-              <h2>📊 Performance Comparison (vs Previous Run)</h2>
-
-              ${process.env.HAS_PREV === "false" 
-              ? `<p><i>Baseline established in this run. Comparison will be available from next execution.</i></p>` 
-              : ""}
-              
-              <table border='1'>
-              <tr>
-                <th>Metric</th>
-                <th>Previous</th>
-                <th>Current</th>
-                <th>Deviation</th>
-              </tr>
-
-              <tr>
-                <td>Avg (ms)</td>
-                <td>${process.env.HAS_PREV === "false" ? "N/A" : process.env.PREV_AVG}</td>
-                <td>${process.env.TOTAL_AVG}</td>
-                <td>
-                <ac:structured-macro ac:name="status">
-                <ac:parameter ac:name="colour">${process.env.AVG_COLOR}</ac:parameter>
-                <ac:parameter ac:name="title">${process.env.HAS_PREV === "false"
-                ? "N/A"
-                : `${process.env.DEV_AVG} ms (${process.env.PERCENT_CHANGE}%)`}</ac:parameter>
-                </ac:structured-macro>
-                </td>
-              </tr>
-
-              <tr>
-                <td>P90 (ms)</td>
-                <td>${process.env.HAS_PREV === "false" ? "N/A" : process.env.PREV_P90}</td>
-                <td>${process.env.TOTAL_P90}</td>
-                <td>
-                <ac:structured-macro ac:name="status">
-                <ac:parameter ac:name="colour">${process.env.P90_COLOR}</ac:parameter>
-                <ac:parameter ac:name="title">
-                ${process.env.HAS_PREV === "false"
-                ? "N/A"
-                : `${process.env.DEV_P90} ms`}
-                </ac:parameter>
-                </ac:structured-macro>
-                </td>
-              </tr>
-              </table>
-  
-              <h2>🎭 Playwright Summary</h2>
-              <table border='1'>
-              <tr><th>Run</th><th>Start</th><th>End</th><th>Duration</th><th>Passed</th><th>Failed</th></tr>
-              ${pwRows}
-              </table>
-
-              <h2>🔐 Security Summary</h2>
-              ${zapSummary}
-
-              <h2>🧠 AI Analysis & Observations</h2>
-              ${process.env.AI_SUMMARY}
-
-              <h2>📎 Attachments</h2>
-              <ac:structured-macro ac:name="attachments"/>`;
-
-              const title = `Performance Report - ${now}`;
-
-              // ✅ Create child page
-              const child = await api(`${baseUrl}/rest/api/content`, "POST", {
-              type: "page",
-              title: title,
-              ancestors: [{ id: parentId }],
-              space: { key: spaceKey },
-              body: {
-                storage: {
-                  value: CONTENT,
-                  representation: "storage"
-              }
-              }
-              });
-
-              const link = child._links.base + child._links.webui;
-
-                // ✅ Fetch parent page
-              
-
-              // ✅ Sr.No calculation
-              let match = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
-
-              let count = 0;
-
-              if (match && match[1]) {
-              const rows = match[1].match(/<tr>/g);
-              count = rows ? rows.length - 1 : 0; // exclude header row
-              }
-
-              const srNo = count + 1;
-
-              // ✅ Status
-              const status = process.env.OVERALL_STATUS === "FAIL"
-              ? `<ac:structured-macro ac:name="status">
-              <ac:parameter ac:name="colour">Red</ac:parameter>
-              <ac:parameter ac:name="title">FAIL</ac:parameter>
-              </ac:structured-macro>`
-              : `<ac:structured-macro ac:name="status">
-              <ac:parameter ac:name="colour">Green</ac:parameter>
-              <ac:parameter ac:name="title">SUCCESS</ac:parameter>
-              </ac:structured-macro>`;
-
-              const deviationCell = process.env.HAS_PREV === "false"
-              ? "N/A"
-              : `<ac:structured-macro ac:name="status">
-              <ac:parameter ac:name="colour">${process.env.AVG_COLOR}</ac:parameter>
-              <ac:parameter ac:name="title">${process.env.DEV_AVG} ms (${process.env.PERCENT_CHANGE}%)</ac:parameter>
-              </ac:structured-macro>`;
-
-              const row = `
-              <tr>
-              <td>${srNo}</td>
-              <td>${now}</td>
-              <td><a href="${link}">${title}</a></td>
-              <td>${process.env.TOTAL_AVG} ms</td>
-              <td>${process.env.TOTAL_P90} ms</td>
-              <td>${status}</td>
-              <td>${deviationCell}</td>
-              </tr>`;
-
-              // ✅ Append row safely
-              html = html.includes("</tbody>")
-              ? html.replace("</tbody>", row + "</tbody>")
-              : html + `<table><tbody>
-              <tr><th>Sr.No</th><th>Created At</th><th>Page</th><th>Avg (ms)</th><th>P90 (ms)</th><th>Status</th><th>Deviation (Avg)</th></tr>
-              ${row}
-              </tbody></table>`;
-              
-              // ✅ Auto re-number Sr.No
-              let counter = 1;
-
-              html = html.replace(
-              /<tbody>([\s\S]*?)<\/tbody>/,
-              (match, tbodyContent) => {
-              const updatedRows = tbodyContent.replace(/<tr>([\s\S]*?)<\/tr>/g, (rowMatch) => {
-
-              // Skip header row
-              if (rowMatch.includes("<th>")) return rowMatch;
-
-              // Replace first <td> (Sr.No)
-              const updatedRow = rowMatch.replace(
-              /<td>.*?<\/td>/,
-              `<td>${counter++}</td>`
-              );
-
-              return updatedRow;
-              });
-
-              return `<tbody>${updatedRows}</tbody>`;
-              }
-              );
-
-              // ✅ Update parent page
-              await api(`${baseUrl}/rest/api/content/${indexPageId}`, "PUT", {
-              id: indexPageId,
-              type: "page",
-              title: parent.title,
-              version: { number: parent.version.number + 1 },
-              body: {
-                storage: {
-                value: html,
-              representation: "storage"
-              }
-              }
-              });
-
-              // ✅ Export page ID for attachments
-              fs.appendFileSync(process.env.GITHUB_ENV, `PAGE_ID=${child.id}\n`);
+        run: bash libraries/publish-confluence.sh
 
       - name: Upload Attachments
-        run: |
-          set +e
-
-          upload() {
-            FILE=$1
-            if [ -f "$FILE" ]; then
-              curl -s -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
-                -X POST -H "X-Atlassian-Token: no-check" \
-                -F "file=@$FILE" \
-                "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment"
-            fi
-          }
-
-          upload results.jtl
-
-          zip -r jmeter-report.zip jmeter-report
-          upload jmeter-report.zip
-
-          upload zap-report.html
-
-          if [ -d "pw-results" ]; then
-            for f in pw-results/*.json; do
-              [ -f "$f" ] && upload "$f"
-            done
-          fi
+        run: bash libraries/upload-attachments.sh
