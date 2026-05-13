@@ -178,6 +178,7 @@ echo "===================================="
 # ============================================================
 
 echo "Creating Confluence page..."
+echo "${BASE_URL}/rest/api/content"
 
 curl --http1.1 \
   --fail-with-body \
