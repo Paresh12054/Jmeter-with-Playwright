@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 
 const baseUrl = process.env.CONFLUENCE_BASE_URL;
 const email = process.env.CONFLUENCE_EMAIL;
@@ -32,6 +33,44 @@ async function api(url, method = "GET", body = null) {
   }
 
   return text ? JSON.parse(text) : {};
+}
+
+async function uploadAttachment(pageId, filePath, contentType) {
+
+  if (!fs.existsSync(filePath)) {
+    console.log(`${filePath} not found`);
+    return;
+  }
+
+  console.log(`Uploading ${filePath}`);
+
+  const buffer = fs.readFileSync(filePath);
+
+  const form = new FormData();
+
+  form.append(
+    "file",
+    new Blob([buffer], { type: contentType }),
+    path.basename(filePath)
+  );
+
+  const response = await fetch(
+    `${baseUrl}/rest/api/content/${pageId}/child/attachment`,
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${auth}`,
+        "X-Atlassian-Token": "no-check"
+      },
+      body: form
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  console.log(`${filePath} uploaded`);
 }
 
 (async () => {
@@ -95,17 +134,12 @@ async function api(url, method = "GET", body = null) {
 
     let devAvg = 0;
     let devP90 = 0;
-    let avgColor = "Grey";
-    let p90Color = "Grey";
     let percentChange = 0;
 
     if (hasPrev && prevAvg > 0) {
 
       devAvg = process.env.TOTAL_AVG - prevAvg;
       devP90 = process.env.TOTAL_P90 - prevP90;
-
-      avgColor = devAvg < 0 ? "Green" : "Red";
-      p90Color = devP90 < 0 ? "Green" : "Red";
 
       percentChange =
         ((devAvg / prevAvg) * 100).toFixed(2);
@@ -136,10 +170,6 @@ async function api(url, method = "GET", body = null) {
           </tr>
         `;
       }).join('');
-
-    // =========================================================
-    // Additional Files
-    // =========================================================
 
     const zapSummary =
       fs.existsSync('zap-summary.html')
@@ -237,7 +267,7 @@ async function api(url, method = "GET", body = null) {
     `;
 
     // =========================================================
-    // Create Report Page
+    // Create Main Report Page
     // =========================================================
 
     const title = `Performance Report - ${now}`;
@@ -264,69 +294,261 @@ async function api(url, method = "GET", body = null) {
     const link =
       child._links.base + child._links.webui;
 
-    // =========================================================
-    // Upload Attachment Helper
-    // =========================================================
+    // ==========================================
+    // ZAP CHILD PAGE
+    // ==========================================
 
-    async function uploadAttachment(pageId, filePath, contentType) {
+    if (fs.existsSync("zap-report.png")) {
 
-      if (!fs.existsSync(filePath)) {
-        console.log(`${filePath} not found`);
-        return;
-      }
+      console.log("Creating ZAP child page...");
 
-      console.log(`Uploading ${filePath}`);
-
-      const buffer = fs.readFileSync(filePath);
-
-      const form = new FormData();
-
-      form.append(
-        "file",
-        new Blob([buffer], { type: contentType }),
-        filePath
-      );
-
-      const response = await fetch(
-        `${baseUrl}/rest/api/content/${pageId}/child/attachment`,
+      const zapChild = await api(
+        `${baseUrl}/rest/api/content`,
+        "POST",
         {
-          method: "POST",
-          headers: {
-            "Authorization": `Basic ${auth}`,
-            "X-Atlassian-Token": "no-check"
-          },
-          body: form
+          type: "page",
+          title: `ZAP Visual Report - ${now}`,
+          ancestors: [{ id: child.id }],
+          space: { key: spaceKey },
+          body: {
+            storage: {
+              value: `
+                <h1>🔐 ZAP Visual Security Report</h1>
+                <p>OWASP ZAP screenshot report.</p>
+              `,
+              representation: "storage"
+            }
+          }
         }
       );
 
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
+      await uploadAttachment(
+        zapChild.id,
+        "zap-report.png",
+        "image/png"
+      );
 
-      console.log(`${filePath} uploaded`);
+      const latestZapPage = await api(
+        `${baseUrl}/rest/api/content/${zapChild.id}?expand=version`
+      );
+
+      await api(
+        `${baseUrl}/rest/api/content/${zapChild.id}`,
+        "PUT",
+        {
+          id: zapChild.id,
+          type: "page",
+          title: latestZapPage.title,
+          version: {
+            number: latestZapPage.version.number + 1
+          },
+          body: {
+            storage: {
+              value: `
+                <h1>🔐 ZAP Visual Security Report</h1>
+
+                <ac:image ac:width="1400">
+                  <ri:attachment ri:filename="zap-report.png"/>
+                </ac:image>
+
+                <h2>📎 Attachments</h2>
+
+                <ac:structured-macro ac:name="attachments"/>
+              `,
+              representation: "storage"
+            }
+          }
+        }
+      );
+
+      console.log("ZAP child page completed");
     }
 
-    // =========================================================
-    // Upload Attachments
-    // =========================================================
+    // ==========================================
+    // JMETER CHILD PAGE
+    // ==========================================
 
-    await uploadAttachment(
-      child.id,
-      "zap-report.png",
-      "image/png"
-    );
+    if (fs.existsSync("jm-graphs")) {
 
-    await uploadAttachment(
-      child.id,
-      "playwright-report.png",
-      "image/png"
-    );
+      console.log("Creating JMeter child page...");
 
-    await uploadAttachment(
-      child.id,
-      "playwright-report.zip",
-      "application/zip"
-    );
+      const jmChild = await api(
+        `${baseUrl}/rest/api/content`,
+        "POST",
+        {
+          type: "page",
+          title: `JMeter Graphs Report - ${now}`,
+          ancestors: [{ id: child.id }],
+          space: { key: spaceKey },
+          body: {
+            storage: {
+              value: `
+                <h1>📈 JMeter Performance Graphs</h1>
+              `,
+              representation: "storage"
+            }
+          }
+        }
+      );
+
+      if (fs.existsSync("jmeter-dashboard-full.png")) {
+
+        await uploadAttachment(
+          jmChild.id,
+          "jmeter-dashboard-full.png",
+          "image/png"
+        );
+      }
+
+      const graphFiles = fs.existsSync("jm-graphs")
+        ? fs.readdirSync("jm-graphs")
+        : [];
+
+      for (const file of graphFiles) {
+
+        await uploadAttachment(
+          jmChild.id,
+          `jm-graphs/${file}`,
+          "image/png"
+        );
+      }
+
+      let graphHtml = `
+        <h1>📈 JMeter Performance Graphs</h1>
+      `;
+
+      if (fs.existsSync("jmeter-dashboard-full.png")) {
+
+        graphHtml += `
+          <h2>📊 Full Dashboard</h2>
+
+          <ac:image ac:width="1600">
+            <ri:attachment ri:filename="jmeter-dashboard-full.png"/>
+          </ac:image>
+        `;
+      }
+
+      for (const file of graphFiles) {
+
+        graphHtml += `
+          <h2>${file}</h2>
+
+          <ac:image ac:width="1400">
+            <ri:attachment ri:filename="${file}"/>
+          </ac:image>
+
+          <br/><br/>
+        `;
+      }
+
+      graphHtml += `
+        <h2>📎 Attachments</h2>
+        <ac:structured-macro ac:name="attachments"/>
+      `;
+
+      const latestJMPage = await api(
+        `${baseUrl}/rest/api/content/${jmChild.id}?expand=version`
+      );
+
+      await api(
+        `${baseUrl}/rest/api/content/${jmChild.id}`,
+        "PUT",
+        {
+          id: jmChild.id,
+          type: "page",
+          title: latestJMPage.title,
+          version: {
+            number: latestJMPage.version.number + 1
+          },
+          body: {
+            storage: {
+              value: graphHtml,
+              representation: "storage"
+            }
+          }
+        }
+      );
+
+      console.log("JMeter child page completed");
+    }
+
+    // ==========================================
+    // PLAYWRIGHT CHILD PAGE
+    // ==========================================
+
+    if (fs.existsSync("playwright-report.png")) {
+
+      console.log("Creating Playwright child page...");
+
+      const pwChild = await api(
+        `${baseUrl}/rest/api/content`,
+        "POST",
+        {
+          type: "page",
+          title: `Playwright UI Report - ${now}`,
+          ancestors: [{ id: child.id }],
+          space: { key: spaceKey },
+          body: {
+            storage: {
+              value: `
+                <h1>🎭 Playwright UI Automation Report</h1>
+              `,
+              representation: "storage"
+            }
+          }
+        }
+      );
+
+      await uploadAttachment(
+        pwChild.id,
+        "playwright-report.png",
+        "image/png"
+      );
+
+      if (fs.existsSync("playwright-report.zip")) {
+
+        await uploadAttachment(
+          pwChild.id,
+          "playwright-report.zip",
+          "application/zip"
+        );
+      }
+
+      const latestPWPage = await api(
+        `${baseUrl}/rest/api/content/${pwChild.id}?expand=version`
+      );
+
+      await api(
+        `${baseUrl}/rest/api/content/${pwChild.id}`,
+        "PUT",
+        {
+          id: pwChild.id,
+          type: "page",
+          title: latestPWPage.title,
+          version: {
+            number: latestPWPage.version.number + 1
+          },
+          body: {
+            storage: {
+              value: `
+                <h1>🎭 Playwright UI Automation Report</h1>
+
+                <ac:image ac:width="1400">
+                  <ri:attachment ri:filename="playwright-report.png"/>
+                </ac:image>
+
+                <h2>📎 Attachments</h2>
+
+                <ac:structured-macro ac:name="attachments"/>
+              `,
+              representation: "storage"
+            }
+          }
+        }
+      );
+
+      console.log("Playwright child page completed");
+    }
 
     // =========================================================
     // Update Parent Summary Page
