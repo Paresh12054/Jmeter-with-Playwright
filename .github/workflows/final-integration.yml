@@ -39,6 +39,10 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq zip
 
+      - name: Install Python Dependencies
+        run: |
+          pip install pandas matplotlib
+
       - uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -132,89 +136,12 @@ jobs:
         run: |
           zip -r playwright-report.zip playwright-report*
 
-      - name: Generate JMeter HTML Report
-        run: bash libraries/generate-jmeter-report.sh
-
-      - name: Generate JMeter Dashboard Screenshots
+      
+      - name: Generate JMeter Graphs
         run: |
-          node <<'EOF'
-          const { chromium } = require('playwright');
-          const path = require('path');
-          const fs = require('fs');
-      
-          (async () => {
-      
-            const browser = await chromium.launch({
-              headless: true
-            });
-      
-            const page = await browser.newPage({
-              viewport: {
-                width: 1600,
-                height: 1200
-              }
-            });
-      
-            const reportPath =
-              'file://' + path.resolve('jmeter-report/index.html');
-      
-            console.log("Opening JMeter dashboard...");
-      
-            await page.goto(reportPath, {
-              waitUntil: 'networkidle',
-              timeout: 120000
-            });
-      
-            // Wait for graphs to render
-            await page.waitForTimeout(5000);
-      
-            // Full dashboard screenshot
-            await page.screenshot({
-              path: 'jmeter-dashboard-full.png',
-              fullPage: true
-            });
-      
-            console.log("Full dashboard screenshot created");
-      
-            // Create graph folder
-            if (!fs.existsSync('jm-graphs')) {
-              fs.mkdirSync('jm-graphs');
-            }
-      
-            // Capture chart canvases
-            const charts = await page.locator('canvas').all();
-      
-            console.log(`Found ${charts.length} charts`);
-            if (charts.length === 0) {
-              console.log("No charts found in dashboard");
-            }
-            for (let i = 0; i < charts.length; i++) {
-      
-              try {
-      
-                const chartPath = `jm-graphs/chart-${i + 1}.png`;
-      
-                await charts[i].screenshot({
-                  path: chartPath
-                });
-      
-                console.log(`Saved ${chartPath}`);
-      
-              } catch (err) {
-      
-                console.log(`Failed chart ${i + 1}: ${err.message}`);
-      
-              }
-            }
-      
-            await browser.close();
-      
-            console.log("JMeter screenshots generation completed");
-      
-          })();
-          EOF
+          python libraries/generate-jmeter-graphs.py
 
-      
+            
       - name: Prepare JTL for AI
         run: |
           echo "Preparing JTL sample for AI..."
