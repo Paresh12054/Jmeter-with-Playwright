@@ -34,7 +34,7 @@ plt.close()
 # =========================================================
 
 throughput = df.resample(
-    '1S',
+    '1s',
     on='timeStamp'
 ).size()
 
