@@ -331,7 +331,7 @@ jobs:
         run: |
           AUTH=$(echo -n "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" | base64)
       
-          curl -v \
+          curl --http1.1 -v \
             -H "Authorization: Basic $AUTH" \
             -H "Content-Type: application/json" \
             "$CONFLUENCE_BASE_URL/rest/api/space"
