@@ -1,10 +1,11 @@
-name: Attach Rovo JTL to Confluence
+name: Create Rovo NFT Results Page
 
 on:
   workflow_dispatch:
 
 jobs:
-  upload-jtl:
+  publish-results:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -12,44 +13,119 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Check JTL File
-        run: |
-          echo "Checking JTL file..."
-          ls -lh data/Rovo_Test1.jtl
-
-      - name: Upload JTL to Confluence
+      - name: Create Confluence Page and Attach JTL
         env:
           CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
           CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+          CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
 
         run: |
 
-          PAGE_ID="6094858"
-          FILE="data/Rovo_Test1.jtl"
+          PAGE_PARENT_ID="6094858"
+          JTL_FILE="data/Rovo_Test1.jtl"
 
-          echo "Uploading $FILE"
-          echo "Target Confluence Page ID: $PAGE_ID"
+          echo "======================================"
+          echo "Creating NFT Results Page"
+          echo "======================================"
 
-          HTTP_STATUS=$(curl -s \
-            -o response.txt \
+          AUTH=$(printf '%s:%s' \
+            "$CONFLUENCE_EMAIL" \
+            "$CONFLUENCE_API_TOKEN" | base64 -w 0)
+
+          NOW=$(date +"%Y-%m-%d %H:%M:%S")
+
+          PAGE_TITLE="Rovo NFT Test Results - ${NOW}"
+
+          # ------------------------------------------------
+          # Create child page
+          # ------------------------------------------------
+
+          PAGE_PAYLOAD=$(cat <<EOF
+          {
+            "type": "page",
+            "title": "${PAGE_TITLE}",
+            "ancestors": [
+              {
+                "id": "${PAGE_PARENT_ID}"
+              }
+            ],
+            "space": {
+              "key": "${CONFLUENCE_SPACE_KEY}"
+            },
+            "body": {
+              "storage": {
+                "value": "<h1>Rovo NFT Test Results</h1><p>JMeter results generated automatically from GitHub Actions.</p><p>JTL file: Rovo_Test1.jtl</p><h2>Attachments</h2><ac:structured-macro ac:name=\"attachments\"/>",
+                "representation": "storage"
+              }
+            }
+          }
+          EOF
+          )
+
+          RESPONSE=$(curl -sS \
+            -w "\nHTTP_STATUS:%{http_code}" \
+            -X POST \
+            "${CONFLUENCE_BASE_URL}/rest/api/content" \
+            -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAGE_PAYLOAD")
+
+          echo "Create page response:"
+          echo "$RESPONSE"
+
+          HTTP_STATUS=$(echo "$RESPONSE" \
+            | grep "HTTP_STATUS" \
+            | cut -d: -f2)
+
+          if [ "$HTTP_STATUS" != "200" ] && [ "$HTTP_STATUS" != "201" ]; then
+            echo "❌ Failed to create Confluence page"
+            exit 1
+          fi
+
+          PAGE_ID=$(echo "$RESPONSE" \
+            | sed '/HTTP_STATUS/d' \
+            | jq -r '.id')
+
+          PAGE_URL=$(echo "$RESPONSE" \
+            | sed '/HTTP_STATUS/d' \
+            | jq -r '._links.base + ._links.webui')
+
+          echo ""
+          echo "✅ Confluence page created"
+          echo "Page ID: $PAGE_ID"
+          echo "Page URL: $PAGE_URL"
+
+          # ------------------------------------------------
+          # Attach JTL
+          # ------------------------------------------------
+
+          echo ""
+          echo "======================================"
+          echo "Attaching JTL"
+          echo "======================================"
+
+          ATTACH_STATUS=$(curl -sS \
+            -o attachment_response.json \
             -w "%{http_code}" \
             -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
             -X POST \
             -H "X-Atlassian-Token: no-check" \
-            -F "file=@$FILE" \
-            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment")
+            -F "file=@${JTL_FILE}" \
+            "${CONFLUENCE_BASE_URL}/rest/api/content/${PAGE_ID}/child/attachment")
 
-          echo "HTTP Status: $HTTP_STATUS"
+          echo "Attachment HTTP status: $ATTACH_STATUS"
 
-          echo "Confluence response:"
-          cat response.txt
+          cat attachment_response.json
 
-          if [ "$HTTP_STATUS" = "200" ]; then
-            echo ""
-            echo "✅ Rovo_Test1.jtl successfully attached to Confluence"
-          else
-            echo ""
-            echo "❌ JTL upload failed"
+          if [ "$ATTACH_STATUS" != "200" ] && [ "$ATTACH_STATUS" != "201" ]; then
+            echo "❌ Failed to attach JTL"
             exit 1
           fi
+
+          echo ""
+          echo "======================================"
+          echo "✅ SUCCESS"
+          echo "======================================"
+          echo "Page: $PAGE_URL"
+          echo "JTL: Rovo_Test1.jtl"
