@@ -16,7 +16,7 @@ jobs:
       - name: Check JTL file
         run: |
           echo "Checking JTL file..."
-          ls -lh data/Rovo_Test1.jtl
+          ls -lh config/Rovo_Test1.jtl
 
       - name: Attach JTL to Confluence
         env:
