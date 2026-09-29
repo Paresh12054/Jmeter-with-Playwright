@@ -1,10 +1,10 @@
-name: JMeter Rovo Analysis
+name: Create NFT Results Page
 
 on:
   workflow_dispatch:
 
 jobs:
-  jmeter-analysis:
+  publish-nft-results:
 
     runs-on: ubuntu-latest
 
@@ -13,23 +13,112 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Check JTL file
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+          echo "JTL file:"
+          ls -lh data/Rovo_Test1.jtl
 
-      - name: Run JMeter Analysis and Publish to Confluence
+      - name: Create Confluence Page and Attach JTL
         env:
           CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
           CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
           CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
-        run: |
-          chmod +x scripts/jmeter_analysis_publish.sh
-          ./scripts/jmeter_analysis_publish.sh
 
-      - name: Upload analysis artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: jmeter-analysis
-          path: rovo-output/
+        run: |
+
+          PARENT_PAGE_ID="6094858"
+          JTL_FILE="data/Rovo_Test1.jtl"
+
+          AUTH=$(printf '%s:%s' \
+            "$CONFLUENCE_EMAIL" \
+            "$CONFLUENCE_API_TOKEN" | base64 -w 0)
+
+          TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+
+          PAGE_TITLE="NFT Test Results - ${TIMESTAMP}"
+
+          echo "======================================"
+          echo "Creating Confluence page"
+          echo "======================================"
+
+          PAGE_PAYLOAD=$(cat <<EOF
+          {
+            "type": "page",
+            "title": "${PAGE_TITLE}",
+            "ancestors": [
+              {
+                "id": "${PARENT_PAGE_ID}"
+              }
+            ],
+            "space": {
+              "key": "${CONFLUENCE_SPACE_KEY}"
+            },
+            "body": {
+              "storage": {
+                "value": "<h1>NFT Test Results</h1><p>JMeter NFT results generated automatically by GitHub Actions.</p><p>JTL results file is attached to this page.</p>",
+                "representation": "storage"
+              }
+            }
+          }
+          EOF
+          )
+
+          RESPONSE=$(curl -sS \
+            -w "\nHTTP_STATUS:%{http_code}" \
+            -X POST \
+            "${CONFLUENCE_BASE_URL%/}/wiki/rest/api/content" \
+            -H "Authorization: Basic ${AUTH}" \
+            -H "Content-Type: application/json" \
+            -d "$PAGE_PAYLOAD")
+
+          echo "$RESPONSE"
+
+          HTTP_STATUS=$(echo "$RESPONSE" \
+            | grep "HTTP_STATUS" \
+            | cut -d: -f2)
+
+          if [ "$HTTP_STATUS" != "200" ] && [ "$HTTP_STATUS" != "201" ]; then
+            echo "❌ Failed to create Confluence page"
+            exit 1
+          fi
+
+          PAGE_ID=$(echo "$RESPONSE" \
+            | sed '/HTTP_STATUS/d' \
+            | jq -r '.id')
+
+          echo "✅ Confluence page created"
+          echo "Page ID: $PAGE_ID"
+
+
+          echo "======================================"
+          echo "Attaching JTL file"
+          echo "======================================"
+
+          ATTACH_RESPONSE=$(curl -sS \
+            -w "\nHTTP_STATUS:%{http_code}" \
+            -X POST \
+            "${CONFLUENCE_BASE_URL%/}/wiki/rest/api/content/${PAGE_ID}/child/attachment?allowDuplicated=true" \
+            -H "Authorization: Basic ${AUTH}" \
+            -H "X-Atlassian-Token: nocheck" \
+            -F "file=@${JTL_FILE}")
+
+          echo "$ATTACH_RESPONSE"
+
+          ATTACH_STATUS=$(echo "$ATTACH_RESPONSE" \
+            | grep "HTTP_STATUS" \
+            | cut -d: -f2)
+
+          if [ "$ATTACH_STATUS" != "200" ] && [ "$ATTACH_STATUS" != "201" ]; then
+            echo "❌ Failed to attach JTL"
+            exit 1
+          fi
+
+          echo "✅ JTL successfully attached"
+
+          echo ""
+          echo "======================================"
+          echo "SUCCESS"
+          echo "======================================"
+          echo "Page ID: $PAGE_ID"
+          echo "Title: $PAGE_TITLE"
