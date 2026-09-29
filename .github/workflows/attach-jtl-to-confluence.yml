@@ -1,48 +1,55 @@
-name: Test Confluence JTL Attachment
+name: Attach Rovo JTL to Confluence
 
 on:
   workflow_dispatch:
 
 jobs:
-  attach-jtl:
+  upload-jtl:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Check JTL file
+      - name: Check JTL File
         run: |
           echo "Checking JTL file..."
           ls -lh data/Rovo_Test1.jtl
 
-      - name: Test Confluence Page Access
+      - name: Upload JTL to Confluence
         env:
           CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
           CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+
         run: |
 
           PAGE_ID="6094858"
+          FILE="data/Rovo_Test1.jtl"
 
-          echo "===================================="
-          echo "Confluence configuration"
-          echo "===================================="
+          echo "Uploading $FILE"
+          echo "Target Confluence Page ID: $PAGE_ID"
 
-          echo "Base URL:"
-          echo "${CONFLUENCE_BASE_URL}"
+          HTTP_STATUS=$(curl -s \
+            -o response.txt \
+            -w "%{http_code}" \
+            -u "$CONFLUENCE_EMAIL:$CONFLUENCE_API_TOKEN" \
+            -X POST \
+            -H "X-Atlassian-Token: no-check" \
+            -F "file=@$FILE" \
+            "$CONFLUENCE_BASE_URL/rest/api/content/$PAGE_ID/child/attachment")
 
-          echo "Page ID:"
-          echo "${PAGE_ID}"
+          echo "HTTP Status: $HTTP_STATUS"
 
-          AUTH=$(printf '%s:%s' \
-            "$CONFLUENCE_EMAIL" \
-            "$CONFLUENCE_API_TOKEN" | base64 -w 0)
+          echo "Confluence response:"
+          cat response.txt
 
-          echo ""
-          echo "Testing page access..."
-
-          curl -i \
-            -u "${CONFLUENCE_EMAIL}:${CONFLUENCE_API_TOKEN}" \
-            -H "Accept: application/json" \
-            "${CONFLUENCE_BASE_URL%/}/wiki/rest/api/content/${PAGE_ID}"
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo ""
+            echo "✅ Rovo_Test1.jtl successfully attached to Confluence"
+          else
+            echo ""
+            echo "❌ JTL upload failed"
+            exit 1
+          fi
