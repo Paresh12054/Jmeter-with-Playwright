@@ -1,47 +1,39 @@
-name: Rovo MCP Connectivity Test
+name: Rovo NFT Analysis
 
 on:
   workflow_dispatch:
 
 jobs:
-  test-rovo:
+  rovo-nft-analysis:
+
     runs-on: ubuntu-latest
 
+    env:
+      ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
+      ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
+
     steps:
-      - name: Test Rovo MCP Connection
-        env:
-          ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
-          ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
         run: |
-          echo "Testing Rovo MCP connectivity..."
+          sudo apt-get update
+          sudo apt-get install -y jq
 
-          AUTH=$(printf '%s:%s' "$ATLASSIAN_EMAIL" "$ATLASSIAN_API_TOKEN" | base64 -w 0)
+      - name: Check JTL file
+        run: |
+          echo "Checking JTL file..."
+          ls -lh data/Rovo_Test1.jtl
 
-          RESPONSE=$(curl -sS \
-            -X POST "https://mcp.atlassian.com/v2/mcp" \
-            -H "Authorization: Basic ${AUTH}" \
-            -H "Content-Type: application/json" \
-            -H "Accept: application/json, text/event-stream" \
-            -d '{
-              "jsonrpc": "2.0",
-              "id": 1,
-              "method": "initialize",
-              "params": {
-                "protocolVersion": "2025-06-18",
-                "capabilities": {},
-                "clientInfo": {
-                  "name": "github-actions",
-                  "version": "1.0.0"
-                }
-              }
-            }')
+      - name: Run Rovo NFT Analysis
+        run: |
+          chmod +x scripts/rovo_nft_analysis.sh
+          ./scripts/rovo_nft_analysis.sh
 
-          echo "Rovo response:"
-          echo "$RESPONSE"
-
-          if echo "$RESPONSE" | grep -q '"result"'; then
-            echo "✅ Rovo MCP initialization successful"
-          else
-            echo "❌ Rovo MCP initialization failed"
-            exit 1
-          fi
+      - name: Upload Rovo analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: rovo-nft-analysis
+          path: rovo-output/
