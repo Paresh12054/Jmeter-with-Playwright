@@ -1,24 +1,22 @@
-name: Attach JTL Results to Confluence
+name: Test Confluence JTL Attachment
 
 on:
   workflow_dispatch:
 
 jobs:
   attach-jtl:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Check JTL file
         run: |
           echo "Checking JTL file..."
-          ls -lh config/Rovo_Test1.jtl
+          ls -lh data/Rovo_Test1.jtl
 
-      - name: Attach JTL to Confluence
+      - name: Test Confluence Page Access
         env:
           CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
@@ -26,33 +24,25 @@ jobs:
         run: |
 
           PAGE_ID="6094858"
-          FILE="config/Rovo_Test1.jtl"
 
-          echo "Attaching:"
-          echo "$FILE"
+          echo "===================================="
+          echo "Confluence configuration"
+          echo "===================================="
+
+          echo "Base URL:"
+          echo "${CONFLUENCE_BASE_URL}"
+
+          echo "Page ID:"
+          echo "${PAGE_ID}"
 
           AUTH=$(printf '%s:%s' \
             "$CONFLUENCE_EMAIL" \
             "$CONFLUENCE_API_TOKEN" | base64 -w 0)
 
-          RESPONSE=$(curl -sS \
-            -w "\nHTTP_STATUS:%{http_code}" \
-            -X POST \
-            "${CONFLUENCE_BASE_URL%/}/wiki/rest/api/content/${PAGE_ID}/child/attachment?allowDuplicated=true" \
-            -H "Authorization: Basic ${AUTH}" \
-            -H "X-Atlassian-Token: no-check" \
-            -F "file=@${FILE}")
+          echo ""
+          echo "Testing page access..."
 
-          echo "Confluence response:"
-          echo "$RESPONSE"
-
-          HTTP_STATUS=$(echo "$RESPONSE" \
-            | grep "HTTP_STATUS" \
-            | cut -d: -f2)
-
-          if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "201" ]; then
-            echo "✅ JTL successfully attached to Confluence"
-          else
-            echo "❌ Failed to attach JTL"
-            exit 1
-          fi
+          curl -i \
+            -u "${CONFLUENCE_EMAIL}:${CONFLUENCE_API_TOKEN}" \
+            -H "Accept: application/json" \
+            "${CONFLUENCE_BASE_URL%/}/wiki/rest/api/content/${PAGE_ID}"
