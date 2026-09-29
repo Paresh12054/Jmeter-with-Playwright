@@ -1,0 +1,47 @@
+name: Rovo MCP Connectivity Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-rovo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Test Rovo MCP Connection
+        env:
+          ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
+          ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
+        run: |
+          echo "Testing Rovo MCP connectivity..."
+
+          AUTH=$(printf '%s:%s' "$ATLASSIAN_EMAIL" "$ATLASSIAN_API_TOKEN" | base64 -w 0)
+
+          RESPONSE=$(curl -sS \
+            -X POST "https://mcp.atlassian.com/v2/mcp" \
+            -H "Authorization: Basic ${AUTH}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json, text/event-stream" \
+            -d '{
+              "jsonrpc": "2.0",
+              "id": 1,
+              "method": "initialize",
+              "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {
+                  "name": "github-actions",
+                  "version": "1.0.0"
+                }
+              }
+            }')
+
+          echo "Rovo response:"
+          echo "$RESPONSE"
+
+          if echo "$RESPONSE" | grep -q '"result"'; then
+            echo "✅ Rovo MCP initialization successful"
+          else
+            echo "❌ Rovo MCP initialization failed"
+            exit 1
+          fi
